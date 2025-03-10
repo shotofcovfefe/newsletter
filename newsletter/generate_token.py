@@ -1,4 +1,3 @@
-import os
 from google_auth_oauthlib.flow import InstalledAppFlow
 
 SCOPES = ['https://www.googleapis.com/auth/gmail.readonly']
