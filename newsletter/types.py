@@ -1,17 +1,19 @@
 from pydantic import BaseModel
 import typing as ta
+from datetime import date
+
 
 class Event(BaseModel):
-    """
-    Pydantic model for structured event extraction.
-    """
     title: str
-    event_date: str
+    event_start_date: ta.Optional[date] = None
+    event_end_date: ta.Optional[date] = None
     location: str
     event_type: str
     description: str
-    email_message_id: ta.Optional[str] = None
+    description_verbatim: str
+    is_event_recurring: ta.Optional[bool] = None
+    event_recur_freq: ta.Optional[str] = None
 
 
 class Events(BaseModel):
-    events: list[Event]
+    events: ta.List[Event]
