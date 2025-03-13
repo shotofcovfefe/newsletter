@@ -75,6 +75,7 @@ def save_email(email_data: t.Dict[str, t.Any]) -> None:
         "message_id": email_data["message_id"],
         "sender": email_data["sender"],
         "subject": email_data["subject"],
+        "email_address": email_data["email_address"],
         "date": date,
         "body": email_data["body"],
         "is_newsletter": email_data["is_newsletter"],

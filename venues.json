@@ -204,6 +204,7 @@
     "name": "Cafe OTO",
     "address": "18-22 Ashwin Street, Dalston, London E8 3DL",
     "url": "https://www.cafeoto.co.uk/",
+    "email": "info@cafeoto.co.uk",
     "venue_type": "experimental music venue",
     "has_newsletter": true,
     "signed_up": true
@@ -291,6 +292,7 @@
     "name": "Matt’s Gallery",
     "address": "92 Webster Road, Bermondsey, London SE16 4DF",
     "url": "https://mattsgallery.org/",
+    "email": "info@mattsgallery.org",
     "venue_type": "art gallery",
     "has_newsletter": true,
     "signed_up": true

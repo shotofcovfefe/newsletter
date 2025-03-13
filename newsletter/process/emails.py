@@ -2,6 +2,7 @@ import logging
 import os
 import re
 from bs4 import BeautifulSoup
+from email.utils import parseaddr
 
 from openai import OpenAI
 
@@ -75,9 +76,6 @@ def main() -> None:
     for email_msg in messages:
         message_id = email_msg.get("Message-ID")
 
-        if '0102019585170ca4' not in message_id:
-            continue
-
         if not message_id:
             logger.warning("Email is missing Message-ID; skipping.")
             continue
@@ -87,9 +85,12 @@ def main() -> None:
             continue
 
         email_body = gmail_client.extract_email_body(email_msg)
+        sender_raw = email_msg.get("From", "unknown")
+        display_name, email_address = parseaddr(str(sender_raw))
         email_data = {
             "message_id": message_id,
-            "sender": email_msg.get("From", "unknown"),
+            "sender": sender_raw,
+            "email_address": email_address,
             "subject": email_msg.get("Subject", "No Subject"),
             "date": email_msg.get("Date", "unknown"),
             "body": email_body
@@ -100,9 +101,7 @@ def main() -> None:
             email_data['body'] = remove_urls(email_body)
 
         try:
-            print("???")
             newsletter_flag = is_events_newsletter(email_data['body'])
-            print('newsletter_flag', newsletter_flag)
         except Exception as exc:
             logger.error(f"Error determining if newsletter: {exc}")
             newsletter_flag = False
