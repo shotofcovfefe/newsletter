@@ -27,18 +27,13 @@ def is_html(text: str) -> bool:
 
 
 def strip_html(html: str) -> str:
-    """
-    Parses HTML with Beautiful Soup, strips tags, and returns the plain text.
-    """
     soup = BeautifulSoup(html, "html.parser")
-    return soup.get_text()
+    text = soup.get_text(separator="#")
+    text = re.sub(r'[\n]+', '\n', text).replace("\n#", "")
+    return text
 
 
 def is_events_newsletter(email_body: str) -> bool:
-    """
-    Uses GPT-4o to determine if the email content is an 'events newsletter'.
-    Returns True if yes, False otherwise.
-    """
     try:
         completion = client.chat.completions.create(
             model="gpt-4o",
@@ -47,7 +42,7 @@ def is_events_newsletter(email_body: str) -> bool:
                 {
                     "role": "system",
                     "content": "You are an AI that classifies whether an email contains details about upcoming events. "
-                               "If the email contains events that can be parsed with dates, respond only with 'true'. Otherwise, respond only with 'false'.",
+                               "If the email contains upcoming events at the venue in question or is obviously an events newsletter, respond only with 'true'. Otherwise, respond only with 'false'.",
                 },
                 {"role": "user", "content": email_body},
             ],
@@ -79,6 +74,10 @@ def main() -> None:
 
     for email_msg in messages:
         message_id = email_msg.get("Message-ID")
+
+        if '0102019585170ca4' not in message_id:
+            continue
+
         if not message_id:
             logger.warning("Email is missing Message-ID; skipping.")
             continue
@@ -87,21 +86,23 @@ def main() -> None:
             logger.info(f"Email with Message-ID {message_id} already exists in DB. Skipping.")
             continue
 
-        # Extract the email's data
+        email_body = gmail_client.extract_email_body(email_msg)
         email_data = {
             "message_id": message_id,
             "sender": email_msg.get("From", "unknown"),
             "subject": email_msg.get("Subject", "No Subject"),
             "date": email_msg.get("Date", "unknown"),
-            "body": gmail_client.extract_email_body(email_msg),
+            "body": email_body
         }
 
-        email_body = gmail_client.extract_email_body(email_msg)
         if is_html(email_body):
             email_body = strip_html(email_body)
+            email_data['body'] = remove_urls(email_body)
 
         try:
-            newsletter_flag = is_events_newsletter(email_body)
+            print("???")
+            newsletter_flag = is_events_newsletter(email_data['body'])
+            print('newsletter_flag', newsletter_flag)
         except Exception as exc:
             logger.error(f"Error determining if newsletter: {exc}")
             newsletter_flag = False
@@ -111,6 +112,10 @@ def main() -> None:
 
         # Save to the database
         save_email(email_data)
+
+
+def remove_urls(text: str) -> str:
+    return re.sub(r'https?:\/\/\S+', '', text, flags=re.MULTILINE).strip()
 
 
 if __name__ == "__main__":

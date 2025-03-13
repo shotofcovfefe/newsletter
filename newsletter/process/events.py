@@ -7,6 +7,7 @@ from openai import OpenAI
 from dotenv import load_dotenv
 
 from newsletter.database import fetch_all_emails, save_events_to_db, email_already_parsed
+from newsletter.process.emails import is_events_newsletter
 from newsletter.types import Events, Event
 
 load_dotenv()
@@ -83,6 +84,7 @@ No text outside of valid JSON.
         return events
 
     except Exception as e:
+        print()
         logger.error(f"Error extracting events: {e}")
         return []
 
@@ -105,9 +107,14 @@ def main() -> None:
             logger.info(f"Email {message_id} was previously parsed. Skipping.")
             continue
 
-        # Check if the email is an events newsletter
+        body_len = len(email_rec["body"])
+        if body_len > 10000:
+            logger.info(f"Email {message_id} body is too long ({body_len}), won't process.")
+            continue
+
+        # Check if the email is an events newsletter (boolean)
         body = email_rec["body"] or ""
-        if is_events_newsletter(body):
+        if email_rec['is_newsletter']:
             logger.info(f"Email {message_id} is an events newsletter. Extracting events...")
 
             # Attempt to parse a send date from email_rec["date"] (assuming it's standard format)

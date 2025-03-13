@@ -1,46 +1,46 @@
-#name: Gmail Newsletter Pipeline
-#
-#on:
-#  push:
-#    branches:
-#      - main
-#  schedule:
-#    - cron: '0 * * * *'  # once every hour at the top of the hour
-#  workflow_dispatch:
-#
-#jobs:
-#  fetch-and-store-emails:
-#    runs-on: ubuntu-latest
-#
-#    env:
-#      CREDENTIALS_JSON: ${{ secrets.CREDENTIALS_JSON }}
-#      TOKEN_JSON: ${{ secrets.TOKEN_JSON }}
-#      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-#      SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
-#
-#    steps:
-#      - name: Checkout code
-#        uses: actions/checkout@v4
-#
-#      - name: Set up Python
-#        uses: actions/setup-python@v5
-#        with:
-#          python-version: '3.11'
-#
-#      - name: Install Poetry
-#        uses: snok/install-poetry@v1
-#        with:
-#          version: latest
-#
-#      - name: Install dependencies
-#        run: poetry install --no-interaction --no-root
-#
-#      - name: Setup credentials.json and token.json
-#        run: |
-#          echo "$CREDENTIALS_JSON" > credentials.json
-#          echo "$TOKEN_JSON" > token.json
-#          echo "SUPABASE_URL=$SUPABASE_URL" > .env
-#          echo "SUPABASE_KEY=$SUPABASE_KEY" >> .env
-#
-#      - name: Run main script
-#        run: poetry run python -m newsletter.process.emails
+name: Gmail Newsletter Pipeline
+
+on:
+  push:
+    branches:
+      - main
+  schedule:
+    - cron: '0 * * * *'  # once every hour at the top of the hour
+  workflow_dispatch:
+
+jobs:
+  fetch-and-store-emails:
+    runs-on: ubuntu-latest
+
+    env:
+      CREDENTIALS_JSON: ${{ secrets.CREDENTIALS_JSON }}
+      TOKEN_JSON: ${{ secrets.TOKEN_JSON }}
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+        with:
+          version: latest
+
+      - name: Install dependencies
+        run: poetry install --no-interaction --no-root
+
+      - name: Setup credentials.json and token.json
+        run: |
+          echo "$CREDENTIALS_JSON" > credentials.json
+          echo "$TOKEN_JSON" > token.json
+          echo "SUPABASE_URL=$SUPABASE_URL" > .env
+          echo "SUPABASE_KEY=$SUPABASE_KEY" >> .env
+
+      - name: Run main script
+        run: poetry run python -m newsletter.process.emails

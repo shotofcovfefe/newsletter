@@ -63,22 +63,21 @@ def save_email(email_data: t.Dict[str, t.Any]) -> None:
     """
     Saves the given email data to the Supabase 'emails' table.
     """
-    raw_date_str = email_data.get("date", "")
-    parsed_date = None
-    if raw_date_str:
+    date = email_data["date"]
+    if date:
         try:
-            dt = dateutil.parser.parse(raw_date_str)
-            parsed_date = dt.isoformat()  # e.g. '2025-03-10T20:58:24+01:00'
+            date = dateutil.parser.parse(date)
+            date = date.isoformat()  # e.g. '2025-03-10T20:58:24+01:00'
         except Exception as e:
-            logger.warning(f"Could not parse date '{raw_date_str}'. Storing as null. Error: {e}")
-            parsed_date = None
+            logger.warning(f"Could not parse date '{date}'. Storing as null. Error: {e}")
 
     data = {
         "message_id": email_data["message_id"],
         "sender": email_data["sender"],
         "subject": email_data["subject"],
-        "date": email_data["date"],
+        "date": date,
         "body": email_data["body"],
+        "is_newsletter": email_data["is_newsletter"],
     }
 
     try:
