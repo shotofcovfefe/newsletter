@@ -2,6 +2,7 @@
   {
     "name": "Bàrd Books",
     "address": "341-343 Roman Road, Bow, London E3 5QR",
+    "postcode": "E3 5QR",
     "url": "https://wearebardbooks.co.uk/",
     "email": "hello@wearebardbooks.co.uk",
     "venue_type": "bookstore",
@@ -11,6 +12,7 @@
   {
     "name": "Pages of Hackney",
     "address": "70 Lower Clapton Road, Hackney, London E5 0RN",
+    "postcode": "E5 0RN",
     "url": "https://pagesofhackney.co.uk/",
     "email": "info@pagesofhackney.co.uk",
     "venue_type": "bookstore",
@@ -20,6 +22,7 @@
   {
     "name": "Nunnery Gallery (Bow Arts)",
     "address": "181-183 Bow Road, Bow, London E3 2SJ",
+    "postcode": "E3 2SJ",
     "url": "https://bowarts.org/whats-on",
     "venue_type": "art gallery",
     "has_newsletter": true,
@@ -28,6 +31,7 @@
   {
     "name": "Chisenhale Gallery",
     "address": "64 Chisenhale Road, Bethnal Green, London E3 5QZ",
+    "postcode": "E3 5QZ",
     "url": "https://chisenhale.org.uk/newsletter",
     "venue_type": "art gallery",
     "has_newsletter": true,
@@ -36,6 +40,7 @@
   {
     "name": "Hackney Museum",
     "address": "1 Reading Lane, Hackney, London E8 1GQ",
+    "postcode": "E8 1GQ",
     "url": "https://hackney-museum.hackney.gov.uk/get-involved/join-our-newsletter/",
     "venue_type": "museum",
     "has_newsletter": true,
@@ -44,6 +49,7 @@
   {
     "name": "Ragged School Museum",
     "address": "46-50 Copperfield Road, Mile End, London E3 4RR",
+    "postcode": "E3 4RR",
     "url": "https://www.raggedschoolmuseum.org.uk/visit-us/whats-on/",
     "venue_type": "museum",
     "has_newsletter": false,
@@ -52,6 +58,7 @@
   {
     "name": "Viktor Wynd Museum of Curiosities",
     "address": "11 Mare Street, Cambridge Heath, London E8 4RP",
+    "postcode": "E8 4RP",
     "url": "https://thelasttuesdaysociety.org/museum/",
     "email": "TheViktorWyndMuseumofUnNaturalHistory@newsletter.thelasttuesdaysociety.org",
     "venue_type": "museum",
@@ -61,6 +68,7 @@
   {
     "name": "Oxford House",
     "address": "Derbyshire Street, Bethnal Green, London E2 6HG",
+    "postcode": "E2 6HG",
     "url": "https://www.oxfordhouse.org.uk/whats-on/",
     "email": "marketing@oxfordhouse.org.uk",
     "venue_type": "community center",
@@ -70,6 +78,7 @@
   {
     "name": "St Margaret’s House",
     "address": "21 Old Ford Road, Bethnal Green, London E2 9PL",
+    "postcode": "E2 9PL",
     "url": "https://www.stmargaretshouse.org.uk/whatson",
     "venue_type": "community center",
     "has_newsletter": true,
@@ -78,6 +87,7 @@
   {
     "name": "Chats Palace",
     "address": "42-44 Brooksby's Walk, Homerton, London E9 6DF",
+    "postcode": "E9 6DF",
     "url": "https://chatspalace.com/whats-on",
     "email": "info@chatspalace.com",
     "venue_type": "community center",
@@ -87,6 +97,7 @@
   {
     "name": "Round Chapel (Clapton)",
     "address": "1D Glenarm Road, Clapton, London E5 0LY",
+    "postcode": "E5 0LY",
     "url": "https://www.roundchapel.org/events",
     "email": "info@hhbt.org.uk",
     "venue_type": "community venue",
@@ -96,6 +107,7 @@
   {
     "name": "Hackney City Farm",
     "address": "1a Goldsmiths Row, Haggerston, London E2 8QA",
+    "postcode": "E2 8QA",
     "url": "https://hackneycityfarm.co.uk/#whats-on",
     "venue_type": "local farm",
     "has_newsletter": false
@@ -103,6 +115,7 @@
   {
     "name": "Stepney City Farm",
     "address": "Stepney Way, Stepney, London E1 3DG",
+    "postcode": "E1 3DG",
     "url": "https://stepneycityfarm.org/visit/events/",
     "email": "communications@stepneycityfarm.org",
     "venue_type": "local farm",
@@ -112,6 +125,7 @@
   {
     "name": "Tower Hamlets Cemetery Park",
     "address": "Southern Grove, Bow, London E3 4PX",
+    "postcode": "E3 4PX",
     "url": "https://fothcp.org/stay-in-touch/",
     "email": "contact@fothcp.org",
     "venue_type": "park",
@@ -121,6 +135,7 @@
   {
     "name": "Victoria Park",
     "address": "Grove Road, Bow, London E3",
+    "postcode": "E3",
     "url": "https://www.towerhamlets.gov.uk/lgnl/leisure_and_culture/parks_and_open_spaces/victoria_park/community_events.aspx",
     "venue_type": "park",
     "has_newsletter": false
@@ -128,6 +143,7 @@
   {
     "name": "Four Corners",
     "address": "121 Roman Road, Bethnal Green, London E2 0QN, UK",
+    "postcode": "E2 0QN",
     "url": "https://www.fourcornersfilm.co.uk/whats-on",
     "email": "info@fourcornersfilm.co.uk",
     "venue_type": "community arts centre (film & photography)",
@@ -137,14 +153,16 @@
   {
     "name": "East London Printmakers",
     "address": "Unit 2, 10-28 Millers Avenue, Hackney, London E8 2DS, UK",
+    "postcode": "E8 2DS",
     "url": "https://www.eastlondonprintmakers.co.uk",
-    "venue_type": "print studio & community workshop",
+    "venue_type": "print studio",
     "has_newsletter": true,
     "signed_up": true
   },
   {
     "name": "Grow Hackney",
     "address": "98C Main Yard, Wallis Road, Hackney Wick, London E9 5LN, UK",
+    "postcode": "E9 5LN",
     "url": "https://www.growhackney.co.uk",
     "email": "hello@growhackney.co.uk",
     "venue_type": "community venue & live music space",
@@ -154,14 +172,16 @@
   {
     "name": "Whitechapel gallery",
     "address": "77-82 Whitechapel High St, London E1 7QX",
+    "postcode": "E1 7QX",
     "url": "https://www.whitechapelgallery.org/visit/",
-    "venue_type": "gallery",
+    "venue_type": "art gallery",
     "has_newsletter": true,
     "signed_up": true
   },
   {
     "name": "The Old Church",
     "address": "Stoke Newington Church Street, Hackney, London N16 9ES, UK",
+    "postcode": "N16 9ES",
     "url": "https://www.theoldchurch.org.uk",
     "venue_type": "arts & community venue",
     "has_newsletter": true,
@@ -170,6 +190,7 @@
   {
     "name": "London Buddhist Center",
     "address": "51 Roman rd, London, E2 0HU",
+    "postcode": "E2 0HU",
     "url": "https://www.londonbuddhistcentre.com/",
     "email": "contact@lbc.org.uk",
     "venue_type": "religious institution",
@@ -179,6 +200,7 @@
   {
     "name": "The Common Press",
     "address": "118 Bethnal Green Road, Shoreditch, London E2 6DG, UK",
+    "postcode": "E2 6DG",
     "url": "https://www.commonpress.co.uk/",
     "email": "aisha@commonpress.co.uk",
     "venue_type": "bookshop & cultural space",
@@ -188,6 +210,7 @@
   {
     "name": "Auto Italia",
     "address": "44 Bonner Road, Bethnal Green, London E2 9JS, UK",
+    "postcode": "E2 9JS",
     "url": "https://autoitaliasoutheast.org",
     "venue_type": "artist-led project space",
     "has_newsletter": true,
@@ -196,6 +219,7 @@
   {
     "name": "The Heritage & Arts Centre",
     "address": "The HAC, Lichfield Rd, Bow, London E3 5AT",
+    "postcode": "E3 5AT",
     "url": "https://thehac.org/",
     "venue_type": "church events space",
     "has_newsletter": false
@@ -203,15 +227,17 @@
   {
     "name": "Cafe OTO",
     "address": "18-22 Ashwin Street, Dalston, London E8 3DL",
+    "postcode": "E8 3DL",
     "url": "https://www.cafeoto.co.uk/",
     "email": "info@cafeoto.co.uk",
-    "venue_type": "experimental music venue",
+    "venue_type": "music venue",
     "has_newsletter": true,
     "signed_up": true
   },
   {
     "name": "Barge East",
     "address": "River Lee, Sweetwater Mooring, White Post Lane, Hackney Wick, London E9 5EN",
+    "postcode": "E9 5EN",
     "url": "https://www.bargeeast.com/",
     "email": "info@bargeeast.com",
     "venue_type": "floating venue",
@@ -221,6 +247,7 @@
   {
     "name": "London Hackspace",
     "address": "447 Hackney Road, London E2 9DY",
+    "postcode": "E2 9DY",
     "url": "https://london.hackspace.org.uk/",
     "venue_type": "makerspace",
     "has_newsletter": false
@@ -228,6 +255,7 @@
   {
     "name": "Dalston Eastern Curve Garden",
     "address": "13 Dalston Lane, London E8 3DF",
+    "postcode": "E8 3DF",
     "url": "https://dalstongarden.org/",
     "venue_type": "hidden garden",
     "has_newsletter": false
@@ -235,14 +263,16 @@
   {
     "name": "Mile End Climbing Wall",
     "address": "Haverfield Road, Bow, London E3 5BE",
+    "postcode": "E3 5BE",
     "url": "https://www.mileendwall.org.uk/",
-    "venue_type": "climbing centre",
+    "venue_type": "climbing gym",
     "has_newsletter": true,
     "signed_up": false
   },
   {
     "name": "Hundred Years Gallery",
     "address": "13 Pearson Street, Hoxton, London E2 8JD",
+    "postcode": "E2 8JD",
     "url": "https://hundredyearsgallery.co.uk/",
     "email": "info@hundredyearsgallery.com",
     "venue_type": "art gallery",
@@ -252,6 +282,7 @@
   {
     "name": "The Approach",
     "address": "47 Approach Road, Bethnal Green, London E2 9LY",
+    "postcode": "E2 9LY",
     "url": "https://theapproach.co.uk/",
     "venue_type": "art gallery",
     "has_newsletter": true,
@@ -260,37 +291,33 @@
   {
     "name": "Vortex Jazz Club",
     "address": "11 Gillett Square, Dalston, London N16 8AZ",
+    "postcode": "N16 8AZ",
     "url": "https://www.vortexjazz.co.uk/",
     "venue_type": "music venue",
     "has_newsletter": false
   },
   {
-    "name": "Bow Arts – The Island",
-    "address": "165 Bow Road, Bow, London E3 2SJ",
-    "url": "https://bowarts.org/whats-on",
-    "venue_type": "community arts space",
-    "has_newsletter": true,
-    "signed_up": true
-  },
-  {
     "name": "St Augustine’s Tower",
     "address": "St John’s Churchyard, Mare Street, Hackney, London E8 1HR",
+    "postcode": "E8 1HR",
     "url": "https://hackneyhistorictower.org/",
-    "venue_type": "historic church tower/community venue",
+    "venue_type": "historic church",
     "has_newsletter": true,
     "signed_up": true
   },
   {
     "name": "Paper Dress Vintage",
     "address": "352a Mare Street, Hackney, London E8 1HR",
+    "postcode": "E8 1HR",
     "url": "https://paperdressvintage.co.uk/",
-    "venue_type": "vintage shop and event space",
+    "venue_type": "vintage shop",
     "has_newsletter": true,
     "signed_up": false
   },
   {
     "name": "Matt’s Gallery",
     "address": "92 Webster Road, Bermondsey, London SE16 4DF",
+    "postcode": "SE16 4DF",
     "url": "https://mattsgallery.org/",
     "email": "info@mattsgallery.org",
     "venue_type": "art gallery",
@@ -300,21 +327,25 @@
   {
     "name": "Netil House",
     "address": "1 Westgate Street, London Fields, London E8 3RL",
+    "postcode": "E8 3RL",
     "url": "https://netilhouse.com/",
-    "venue_type": "creative hub and event space",
+    "email": "brandmarketing@eatworkart.com",
+    "venue_type": "creative hub",
     "has_newsletter": true,
     "signed_up": true
   },
   {
     "name": "The People’s Park Tavern",
     "address": "360 Victoria Park Road, Victoria Park Village, London E9 7BT",
+    "postcode": "E9 7BT",
     "url": "https://peoplesparktavern.pub/",
-    "venue_type": "pub and event venue",
+    "venue_type": "pub",
     "has_newsletter": false
   },
   {
     "name": "Pavilion Cafe",
     "address": "Victoria Park, Grove Road, Bow, London E3 5TB",
+    "postcode": "E3 5TB",
     "url": "https://www.pavilionbread.com/victoria-park",
     "venue_type": "cafe and community space",
     "has_newsletter": true,
@@ -323,6 +354,7 @@
   {
     "name": "Limehouse Town Hall",
     "address": "646 Commercial Road, Limehouse, London E14 7HA",
+    "postcode": "E14 7HA",
     "url": "https://limehousetownhall.co.uk/",
     "venue_type": "community arts venue",
     "has_newsletter": false
@@ -330,8 +362,47 @@
   {
     "name": "The Grapes",
     "address": "117 Narrow Street, Limehouse, London E14 8BP",
+    "postcode": "E14 8BP",
     "url": "https://www.thegrapes.co.uk/",
-    "venue_type": "wine bar and event space",
+    "venue_type": "pub",
     "has_newsletter": false
+  },
+  {
+    "name": "E5 Poplar Bakehouse",
+    "address": "e5 Bakehouse, Arch 395, Mentmore Terrace, London E8 3PH",
+    "postcode": "E8 3PH",
+    "url": "https://e5bakehouse.com/poplar-bakehouse",
+    "email": "info@e5bakehouse.com",
+    "venue_type": "cafe",
+    "has_newsletter": true,
+    "signed_up": true
+  },
+  {
+    "name": "The Colborn",
+    "address": "8 Coborn Road, Bow E3 2DA",
+    "postcode": "E3 2DA",
+    "url": "https://www.thecoborn.co.uk/",
+    "email": "coborn@youngs.co.uk",
+    "venue_type": "pub",
+    "has_newsletter": true,
+    "signed_up": true
+  },
+  {
+    "name": "Morgan Arms",
+    "address": "43 Morgan Street Bow Greater London England E3 5AA",
+    "postcode": "E3 5AA",
+    "url": "https://www.morganarmsbow.com/",
+    "venue_type": "pub",
+    "has_newsletter": true,
+    "signed_up": true
+  },
+  {
+    "name": "Genesis Cinema",
+    "address": "93-95 Mile End Road, Whitechapel, London E1 4UJ",
+    "postcode": "E1 4UJ",
+    "url": "https://www.genesiscinema.co.uk/",
+    "venue_type": "cinema",
+    "has_newsletter": true,
+    "signed_up": true
   }
 ]

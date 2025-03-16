@@ -1,6 +1,7 @@
 import logging
 import os
 import re
+import email.header
 from bs4 import BeautifulSoup
 from email.utils import parseaddr
 
@@ -10,7 +11,6 @@ from newsletter.gmail_client import GmailClient
 from newsletter.database import email_exists, save_email
 
 logging.basicConfig(level=logging.INFO)
-
 logger = logging.getLogger(__name__)
 
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
@@ -32,6 +32,38 @@ def strip_html(html: str) -> str:
     text = soup.get_text(separator="#")
     text = re.sub(r'[\n]+', '\n', text).replace("\n#", "")
     return text
+
+
+def decode_sender_name(sender_raw: str) -> str:
+    """
+    Extracts and decodes the sender's name from the raw From field.
+    Ensures the result is UTF-8 decoded and free from surrounding quotes.
+    """
+    # parseaddr splits into display_name, email_address
+    display_name, _ = parseaddr(sender_raw)
+
+    if not display_name:
+        return None
+
+    # decode_header may return a list of (bytes / string, encoding)
+    decoded_parts = email.header.decode_header(display_name)
+    decoded_str = []
+    for part, enc in decoded_parts:
+        if isinstance(part, bytes):
+            enc = enc or "utf-8"
+            decoded_str.append(part.decode(enc, errors="replace"))
+        else:
+            # Already a string
+            decoded_str.append(part)
+
+    # Join together
+    decoded_name = "".join(decoded_str)
+
+    # Remove any surrounding quotes
+    decoded_name = decoded_name.replace('"', "").strip()
+
+    return decoded_name or None
+
 
 
 def is_events_newsletter(email_body: str) -> bool:
@@ -86,10 +118,14 @@ def main() -> None:
 
         email_body = gmail_client.extract_email_body(email_msg)
         sender_raw = email_msg.get("From", "unknown")
+        _, email_address = parseaddr(str(sender_raw))
         display_name, email_address = parseaddr(str(sender_raw))
+        sender_name = decode_sender_name(sender_raw)
+
         email_data = {
             "message_id": message_id,
             "sender": sender_raw,
+            "sender_name": sender_name,
             "email_address": email_address,
             "subject": email_msg.get("Subject", "No Subject"),
             "date": email_msg.get("Date", "unknown"),

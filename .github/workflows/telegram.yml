@@ -1,23 +1,23 @@
-name: Gmail Newsletter Pipeline
+name: Newsletter Processing and Distribution Pipeline
 
 on:
   push:
     branches:
       - main
   schedule:
-    - cron: '0 * * * *'  # once every hour at the top of the hour
+    - cron: '0 1 * * 0'  # Once every week on Sunday at 1am UTC
   workflow_dispatch:
 
 jobs:
-  fetch-and-store-emails:
+  process-and-distribute-newsletter:
     runs-on: ubuntu-latest
 
     env:
-      CREDENTIALS_JSON: ${{ secrets.CREDENTIALS_JSON }}
-      TOKEN_JSON: ${{ secrets.TOKEN_JSON }}
       SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
       SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      BROADCAST_MODE: "true"
 
     steps:
       - name: Checkout code
@@ -36,13 +36,19 @@ jobs:
       - name: Install dependencies
         run: poetry install --no-interaction --no-root
 
-      - name: Setup credentials.json and token.json
+      - name: Setup environment variables
         run: |
-          echo "$CREDENTIALS_JSON" > credentials.json
-          echo "$TOKEN_JSON" > token.json
           echo "SUPABASE_URL=$SUPABASE_URL" > .env
           echo "SUPABASE_KEY=$SUPABASE_KEY" >> .env
           echo "OPENAI_API_KEY=$OPENAI_API_KEY" >> .env
+          echo "TELEGRAM_BOT_TOKEN=$TELEGRAM_BOT_TOKEN" >> .env
+          echo "BROADCAST_MODE=true" >> .env
 
-      - name: Run main script
-        run: poetry run python -m newsletter.process.emails
+      - name: Run newsletter processing script
+        run: poetry run python -m newsletter.process.newsletter
+
+      - name: Broadcast newsletter to Telegram subscribers
+        run: poetry run python -m newsletter.distribution.telegram
+
+      - name: Log completion
+        run: echo "Newsletter processing and distribution completed at $(date)"
