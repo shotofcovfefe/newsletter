@@ -1,1 +1,1 @@
-worker: poetry run python -m newsletter.process.telegram
+worker: python -m newsletter.process.telegram
