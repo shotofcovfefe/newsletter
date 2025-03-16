@@ -1,21 +1,23 @@
-name: Newsletter Processing Pipeline
+name: Newsletter Processing and Distribution Pipeline
 
 on:
   push:
     branches:
       - main
   schedule:
-    - cron: '0 0 * * 0'  # Once every week on Sunday at midnight UTC
+    - cron: '0 1 * * 0'  # Once every week on Sunday at 1am UTC
   workflow_dispatch:
 
 jobs:
-  process-newsletter:
+  process-and-distribute-newsletter:
     runs-on: ubuntu-latest
 
     env:
       SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
       SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      BROADCAST_MODE: "true"
 
     steps:
       - name: Checkout code
@@ -39,9 +41,14 @@ jobs:
           echo "SUPABASE_URL=$SUPABASE_URL" > .env
           echo "SUPABASE_KEY=$SUPABASE_KEY" >> .env
           echo "OPENAI_API_KEY=$OPENAI_API_KEY" >> .env
+          echo "TELEGRAM_BOT_TOKEN=$TELEGRAM_BOT_TOKEN" >> .env
+          echo "BROADCAST_MODE=true" >> .env
 
       - name: Run newsletter processing script
         run: poetry run python -m newsletter.process.newsletter
 
+      - name: Broadcast newsletter to Telegram subscribers
+        run: poetry run python -m newsletter.process.telegram
+
       - name: Log completion
-        run: echo "Newsletter processing completed at $(date)"
+        run: echo "Newsletter processing and distribution completed at $(date)"
