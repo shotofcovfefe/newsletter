@@ -243,11 +243,11 @@ def main():
     1. Interactive mode: Process incoming messages from users
     2. Broadcast mode: Send the latest newsletter to all subscribers
     """
-    # Check if we should run in broadcast mode
-    if os.getenv("BROADCAST_MODE", "").lower() == "true":
-        logger.info("Running in broadcast mode.")
-        broadcast_latest_newsletter()
-        return
+    # # Check if we should run in broadcast mode
+    # if os.getenv("BROADCAST_MODE", "").lower() == "true":
+    #     logger.info("Running in broadcast mode.")
+    #     broadcast_latest_newsletter()
+    #     return
 
     # Otherwise, run in interactive mode
     logger.info("Running in interactive mode. Listening for messages...")
