@@ -404,5 +404,221 @@
     "venue_type": "cinema",
     "has_newsletter": true,
     "signed_up": true
+  },
+  {
+    "name": "The Residence Gallery",
+    "address": "229 Victoria Park Road, London, United Kingdom, E9 7HD",
+    "postcode": "E9 7HD",
+    "url": "https://www.theresidencegallery.com/",
+    "venue_type": "art gallery",
+    "has_newsletter": true,
+    "signed_up": true
+  },
+  {
+    "name": "Annka Kultys Gallery",
+    "address": "Unit 9, 472 Hackney Road, London E2 9EQ",
+    "postcode": "E2 9EQ",
+    "url": "https://www.annkakultys.com/",
+    "venue_type": "art gallery",
+    "has_newsletter": true,
+    "signed_up": true
+  },
+  {
+    "name": "Claire de Rouen",
+    "address": "260 Globe Road, London E2 0JD",
+    "postcode": "E2 0JD",
+    "url": "https://shop.clairederouenbooks.com/",
+    "venue_type": "bookstore",
+    "has_newsletter": false
+  },
+  {
+    "name": "The Broadway Bookshop",
+    "address": "6 Broadway Market London E8 4QJ",
+    "postcode": "E8 4QJ",
+    "url": "https://www.broadwaybookshophackney.com/",
+    "venue_type": "bookstore",
+    "has_newsletter": true,
+    "signed_up": true
+  },
+  {
+    "name": "Donlon Books",
+    "address": "75 Broadway Market London, E8 4PH",
+    "postcode": "E8 4PH",
+    "url": "https://donlonbooks.com/blogs/",
+    "venue_type": "bookstore",
+    "has_newsletter": true,
+    "signed_up": true
+  },
+  {
+    "name": "Young V&A",
+    "address": "Cambridge Heath Rd,\nBethnal Green, London E2 9PA",
+    "postcode": "E2 9PA",
+    "url": "https://www.vam.ac.uk/young/",
+    "venue_type": "museum",
+    "has_newsletter": true,
+    "signed_up": true
+  },
+  {
+    "name": "Juju's Bar",
+    "address": "Ely's Yard 15 Hanbury Street London E1 6QR",
+    "postcode": "E1 6QR",
+    "url": "https://www.jujusbarandstage.com/",
+    "venue_type": "bar",
+    "has_newsletter": true,
+    "signed_up": true
+  },
+  {
+    "name": "Bermondsey Bar and Kitchen",
+    "address": "40 Bermondsey St, London SE1 3UD",
+    "postcode": "SE1 3UD",
+    "url": "https://www.bermondseybarandkitchen.co.uk/",
+    "venue_type": "bar & kitchen",
+    "has_newsletter": true,
+    "signed_up": true
+  },
+  {
+    "name": "The Last Tuesday Society",
+    "address": "11 Mare Street London E8 4RP",
+    "postcode": "E8 4RP",
+    "url": "https://thelasttuesdaysociety.org/",
+    "venue_type": "cocktail bar",
+    "has_newsletter": true,
+    "signed_up": true
+  },
+  {
+    "name": "Wilton Way Gallery",
+    "address": "61 Wilton Way, London E8 1BG",
+    "postcode": "E8 1BG",
+    "url": "http://www.wiltonwaygallery.com",
+    "venue_type": "art gallery",
+    "has_newsletter": false
+  },
+  {
+    "name": "St Anne's Church, Limehouse",
+    "address": "St Anne's Church, Three Colt St, London E14 8HH",
+    "postcode": "E14 8HH",
+    "url": "https://stanneslimehouse.org/",
+    "venue_type": "church",
+    "has_newsletter": true,
+    "signed_up": false
+  },
+  {
+    "name": "Brick Lane Bookshop",
+    "address": "166 Brick Ln, London E1 6RU",
+    "postcode": "E1 6RU",
+    "url": "https://bricklanebookshop.org/events/",
+    "venue_type": "bookstore",
+    "has_newsletter": true,
+    "signed_up": true
+  },
+  {
+    "name": "Libreria",
+    "address": "65 Hanbury St, London E1 5JL",
+    "postcode": "E1 5JL",
+    "url": "https://libreria.io/cultural-programme/",
+    "venue_type": "bookstore",
+    "has_newsletter": false
+  },
+  {
+    "name": "The Brady Arts Centre",
+    "address": "192-196 Hanbury Street, London, E1 5HU",
+    "postcode": "E1 5HU",
+    "url": "https://www.towerhamletsarts.org.uk/?cid=49992&guide=Venues",
+    "venue_type": "art gallery",
+    "has_newsletter": false
+  },
+  {
+    "name": "Resistance Gallery",
+    "address": "265 Poyser St, London E2 9RF",
+    "postcode": "E2 9RF",
+    "url": "http://resistancegallery.blogspot.com/",
+    "venue_type": "art gallery",
+    "has_newsletter": false
+  },
+  {
+    "name": "Idea Store Whitechapel",
+    "address": "321 Whitechapel Rd, London E1 1BU",
+    "postcode": "E1 1BU",
+    "url": "https://www.ideastore.co.uk/",
+    "venue_type": "library",
+    "has_newsletter": false
+  },
+  {
+    "name": "Scarlett Letters",
+    "address": "140 Cambridge Heath Rd, Bethnal Green, London E1 5QJ",
+    "postcode": "E1 5QJ",
+    "url": "https://www.scarlettletters.co.uk/",
+    "venue_type": "bookstore",
+    "has_newsletter": true,
+    "signed_up": true
+  },
+  {
+    "name": "Newham Bookshop",
+    "address": " 743-745 Barking Rd, London E13 9ER",
+    "postcode": "E13 9ER",
+    "url": "https://www.newhambooks.co.uk/",
+    "venue_type": "bookstore",
+    "has_newsletter": true,
+    "signed_up": true
+  },
+  {
+    "name": "St John on Bethnal Green",
+    "address": "200 Cambridge Heath Rd, Bethnal Green, London E2 9PA",
+    "postcode": "E2 9PA",
+    "url": "https://www.stjohnonbethnalgreen.church/",
+    "venue_type": "church/art gallery",
+    "has_newsletter": false
+  },
+  {
+    "name": "Bethnal Green Library",
+    "address": "Cambridge Heath Rd, London E2 0HL",
+    "postcode": "E2 0HL",
+    "url": "https://www.ideastore.co.uk/whats-on",
+    "venue_type": "library",
+    "has_newsletter": false,
+    "signed_up": false
+  },
+  {
+    "name": "St Peter's Bethnal Green",
+    "address": "St Peter's Cl, London E2 7AE",
+    "postcode": "E2 7AE",
+    "url": "https://www.stpetersbethnalgreen.org/",
+    "venue_type": "church",
+    "has_newsletter": false
+  },
+  {
+    "name": "St Barnabas Bethnal Green",
+    "address": "Grove Rd., Bow, London E3 5TG",
+    "postcode": "E3 5TG",
+    "url": "https://stbarnabasbethnalgreen.org/",
+    "venue_type": "church",
+    "has_newsletter": true,
+    "signed_up": false
+  },
+  {
+    "name": "Tower Hamlets Local History Library & Archives",
+    "address": "277 Bancroft Road, London E2 0AJ",
+    "postcode": "E2 0AJ",
+    "url": "https://www.towerhamletsarts.org.uk/?cid=18045&guide=venues",
+    "venue_type": "library/archive",
+    "has_newsletter": false
+  },
+  {
+    "name": "St Dunstan and All Saints Stepney",
+    "url": "https://www.achurchnearyou.com/church/15462/",
+    "address": "Stepney High St, London E1 0NR",
+    "postcode": "E1 0NR",
+    "venue_type": "church",
+    "has_newsletter": true,
+    "signed_up": true
+  },
+  {
+    "name": "The Castle Cinema",
+    "url": "https://thecastlecinema.com/",
+    "address": "64-66 Brooksby's Walk\nHackney, London E9 6DA",
+    "postcode": "E9 6DA",
+    "venue_type": "cinema",
+    "has_newsletter": true,
+    "signed_up": true
   }
 ]

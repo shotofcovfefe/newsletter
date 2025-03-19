@@ -3,7 +3,8 @@ import time
 import logging
 import datetime
 import requests
-import typing as t
+import typing as ta
+from collections import defaultdict
 from supabase import create_client
 from dotenv import load_dotenv
 
@@ -12,16 +13,14 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
-# Load environment variables
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 
-# Initialize Supabase client
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 
-def get_latest_newsletter() -> t.Optional[t.Dict[str, t.Any]]:
+def get_latest_newsletter() -> ta.Optional[ta.Dict[str, ta.Any]]:
     """
     Retrieves the latest newsletter entry from the database that was created in the last day.
     Returns None if no recent newsletter is found.
@@ -75,7 +74,7 @@ def send_telegram_message(chat_id: str, text: str) -> bool:
         payload = {
             "chat_id": chat_id,
             "text": part,
-            "parse_mode": "HTML"  # Allow basic HTML formatting
+            "parse_mode": "HTML"
         }
 
         try:
@@ -92,16 +91,28 @@ def send_telegram_message(chat_id: str, text: str) -> bool:
     return success
 
 
-def format_newsletter_for_telegram(newsletter: t.Dict[str, t.Any]) -> str:
+def derive_newsletter_index() -> int:
+    response = supabase.table("newsletter_events").select("newsletter_id, event_id").execute()
+
+    newsletter_events = defaultdict(set)
+    for row in response.data:
+        newsletter_events[row["newsletter_id"]].add(row["event_id"])
+
+    unique_event_sets = {frozenset(event_set) for event_set in newsletter_events.values()}
+    return len(unique_event_sets)
+
+
+def format_newsletter_for_telegram(newsletter: ta.Dict[str, ta.Any]) -> str:
     """
     Formats the newsletter content for Telegram.
     Basic HTML formatting is supported.
     """
-    # Extract the body text from the newsletter
     body = newsletter.get("body", "")
 
+    issue_number = derive_newsletter_index()
+
     # Add a header
-    header = "<b>📅 EVENTS NEWSLETTER</b>\n\n"
+    header = f"<b>📅 EVENTS NEWSLETTER VOL. #{issue_number}</b>\n\n"
 
     # Format the body - replace newlines with HTML line breaks if needed
     formatted_text = header + body
@@ -109,10 +120,7 @@ def format_newsletter_for_telegram(newsletter: t.Dict[str, t.Any]) -> str:
     return formatted_text
 
 
-def get_telegram_updates(offset: int = None) -> t.List[t.Dict]:
-    """
-    Gets updates (new messages, etc.) from the Telegram Bot API.
-    """
+def get_telegram_updates(offset: int = None) -> ta.List[ta.Dict]:
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/getUpdates"
     params = {"timeout": 30}
     if offset:
@@ -130,19 +138,14 @@ def get_telegram_updates(offset: int = None) -> t.List[t.Dict]:
         return []
 
 
-def process_message(message: t.Dict) -> None:
-    """
-    Process an incoming message and respond accordingly.
-    """
+def process_message(message: ta.Dict) -> None:
     chat_id = message.get('chat', {}).get('id')
     text = message.get('text', '').lower()
 
     if not chat_id:
         return
 
-    # Store this chat_id in the database as a subscriber
     try:
-        # Check if this chat is already subscribed
         response = (
             supabase
             .table("telegram_subscribers")
@@ -152,7 +155,6 @@ def process_message(message: t.Dict) -> None:
         )
 
         if not response.data:
-            # If not subscribed, add them
             supabase.table("telegram_subscribers").insert({
                 "chat_id": str(chat_id),
                 "subscribed_date": datetime.datetime.now().isoformat()
@@ -161,11 +163,11 @@ def process_message(message: t.Dict) -> None:
     except Exception as exc:
         logger.error(f"Error managing subscription: {exc}")
 
-    # Handle different commands
-    if text == '/start' or text == 'hello' or text == 'hi':
+    if text in ['/start', '/help', 'hello', 'hi']:
         welcome_msg = (
-            "Welcome to the Events Newsletter Bot! 👋\n\n"
-            "I'll send you updates about the latest events. Here are my commands:\n"
+            "Welcome to the Niche London Events bot! 👋\n\n"
+            "I curate a weekly newsletter about local and low-key London events. And no, you won't find these on Time Out.\n"
+            "Here are my commands:\n"
             "/latest - Get the latest newsletter\n"
             "/subscribe - Subscribe to receive newsletters\n"
             "/unsubscribe - Unsubscribe from newsletters"
@@ -181,7 +183,6 @@ def process_message(message: t.Dict) -> None:
             send_telegram_message(chat_id, "Sorry, I don't have any recent newsletters to share.")
 
     elif text == '/subscribe':
-        # We already added them to subscribers above, just confirm
         send_telegram_message(chat_id, "You've been subscribed to receive event newsletters! 🎉")
 
     elif text == '/unsubscribe':

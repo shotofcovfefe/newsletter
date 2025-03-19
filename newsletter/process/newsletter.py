@@ -20,6 +20,21 @@ supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 
+def fetch_used_event_ids() -> t.Set[int]:
+    try:
+        response = (
+            supabase.table("newsletter_events")
+            .select("event_id")
+            .execute()
+        )
+        used_ids = {row["event_id"] for row in response.data} if response.data else set()
+        logger.info(f"Fetched {len(used_ids)} previously used event IDs.")
+        return used_ids
+    except Exception as exc:
+        logger.error(f"Failed to fetch used event IDs: {exc}")
+        return set()
+
+
 def fetch_events_last_7_days() -> t.List[t.Dict[str, t.Any]]:
     """
     Fetch all event records from the 'events' table that were *created* in the last 7 days.
@@ -65,11 +80,16 @@ def filter_non_recurring_upcoming(events: t.List[t.Dict[str, t.Any]]) -> t.List[
     (event_start_date >= today).
     """
     today = datetime.date.today()
-
+    used_event_ids = fetch_used_event_ids()
     filtered = []
     for ev in events:
+        # Skip recurring events
         if ev.get("is_recurring") is True:
-            continue  # Skip recurring events
+            continue
+
+        # Skip events that have already been used
+        if ev["id"] in used_event_ids:
+            continue
 
         event_start = ev.get("event_start_date")
         if event_start:
