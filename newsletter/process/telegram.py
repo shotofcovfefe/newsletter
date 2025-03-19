@@ -163,10 +163,10 @@ def process_message(message: ta.Dict) -> None:
     except Exception as exc:
         logger.error(f"Error managing subscription: {exc}")
 
-    if text in ['/start', '/help', 'hello', 'hi']:
+    if text.lower() in ['/start', '/help', 'hello', 'hi', 'help', '?']:
         welcome_msg = (
-            "Welcome to the Niche London Events bot! 👋\n\n"
-            "I curate a weekly newsletter about local and low-key London events. And no, you won't find these on Time Out.\n"
+            "Welcome to Niche London Events! 👋\n\n"
+            "I curate a weekly newsletter about local and low-key London events. No, you won't find these on Time Out.\n"
             "Here are my commands:\n"
             "/latest - Get the latest newsletter\n"
             "/subscribe - Subscribe to receive newsletters\n"

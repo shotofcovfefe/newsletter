@@ -620,5 +620,42 @@
     "venue_type": "cinema",
     "has_newsletter": true,
     "signed_up": true
+  },
+  {
+    "name": "ArtSect Gallery",
+    "url": "https://www.artsect.xyz/",
+    "address": "Algha works, Smeed Rd, Bow, London E3 2NR",
+    "postcode": "E3 2NR",
+    "venue_type": "art gallery",
+    "has_newsletter": true,
+    "signed_up": true
+  },
+  {
+    "name": "Gresham College",
+    "url": "https://www.gresham.ac.uk/",
+    "address": "Barnard's Inn Hall, Barnards Inn, City of London, London EC1N 2HH",
+    "email": "enquiries@gresham.ac.uk",
+    "postcode": "EC1N 2HH",
+    "venue_type": "college",
+    "has_newsletter": true,
+    "signed_up": true
+  },
+  {
+    "name": "St Clement Danes Church",
+    "url": "https://stclementdanesraf.org/",
+    "address": "Central Church of the Royal Air Force, Strand, London WC2R 1DH",
+    "postcode": "WC2R 1DH",
+    "venue_type": "church",
+    "has_newsletter": true,
+    "signed_up": true
+  },
+  {
+    "name": "Two Temple Place",
+    "url": "https://twotempleplace.org/whats-on/",
+    "address": "Two Temple Place, London WC2R 3BD",
+    "postcode": "WC2R 3BD",
+    "venue_type": "exhibition & cultural events centre",
+    "has_newsletter": true,
+    "signed_up": true
   }
 ]

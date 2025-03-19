@@ -308,7 +308,10 @@ def main():
     scored_events = score_events_with_ai(filtered_events)
 
     # 4) Keep at most two events per venue
-    final_events = limit_two_per_venue(scored_events)
+    limited_by_venue = limit_two_per_venue(scored_events)
+
+    # 5) Apply a hard limit of 10 events for the newsletter
+    final_events = limited_by_venue[:10]
 
     logger.info("=== Selected Events ===")
     for e in final_events:
@@ -321,14 +324,14 @@ def main():
         except:
             continue
 
-    # 5) Generate one cohesive text block from final_events
+    # 6) Generate one cohesive text block from final_events
     newsletter_text = generate_newsletter_text(final_events)
     logger.info("Newsletter text:\n" + newsletter_text)
 
-    # 6) Insert a single row into `newsletter` (returns newsletter_id)
+    # 7) Insert a single row into `newsletter` (returns newsletter_id)
     newsletter_id = create_newsletter_record(newsletter_text)
 
-    # 7) Insert each final event into `newsletter_events` referencing that newsletter_id
+    # 8) Insert each final event into `newsletter_events` referencing that newsletter_id
     add_events_to_newsletter(newsletter_id, final_events)
 
     logger.info("Newsletter pipeline complete.")
