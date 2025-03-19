@@ -95,7 +95,7 @@
     "signed_up": true
   },
   {
-    "name": "Round Chapel (Clapton)",
+    "name": "Round Chapel",
     "address": "1D Glenarm Road, Clapton, London E5 0LY",
     "postcode": "E5 0LY",
     "url": "https://www.roundchapel.org/events",
@@ -657,5 +657,233 @@
     "venue_type": "exhibition & cultural events centre",
     "has_newsletter": true,
     "signed_up": true
+  },
+  {
+    "name": "Brilliant Corners",
+    "url": "https://brilliantcornerslondon.co.uk/",
+    "address": "470 Kingsland Rd, London E8 4AE",
+    "postcode": "E8 4AE",
+    "venue_type": "jazz bar",
+    "has_newsletter": true,
+    "signed_up": false
+  },
+  {
+    "name": "Green Note",
+    "url": "https://www.greennote.co.uk/events-page/",
+    "address": "106 Parkway, London NW1 7AN",
+    "postcode": "NW1 7AN",
+    "venue_type": "jazz bar",
+    "has_newsletter": true,
+    "signed_up": true
+  },
+  {
+    "name": "sYp",
+    "url": "https://www.sypcity.co.uk/live-jazz",
+    "address": "19 Bevis Marks, City of London, London EC3A 7JA",
+    "postcode": "EC3A 7JA",
+    "venue_type": "cocktail and jazz bar",
+    "has_newsletter": true,
+    "signed_up": true
+  },
+  {
+    "name": "Jamboree",
+    "url": "https://www.jamboreevenue.co.uk/upcoming-events/",
+    "address": "6 St Chad's Pl, London WC1X 9HH",
+    "postcode": "WC1X 9HH",
+    "venue_type": "music bar",
+    "has_newsletter": true,
+    "signed_up": true
+  },
+  {
+    "name": "Ninety One Living Room",
+    "url": "https://91livingroom.com/whats-on/",
+    "address": "91 Brick Lane, London, E1 6QL",
+    "postcode": "E1 6QL",
+    "venue_type": "jazz and music bar",
+    "has_newsletter": true,
+    "signed_up": true
+  },
+  {
+    "name": "Cafe 1001",
+    "url": "https://www.cafe1001.co.uk/",
+    "address": "91 Brick Lane London, E1 6QL",
+    "postcode": "E1 6QL",
+    "venue_type": "cafe and music bar",
+    "has_newsletter": true,
+    "signed_up": true
+  },
+  {
+    "name": "Oliver's Jazz Bar",
+    "url": "https://oliversjazzbar.com/whats-on/",
+    "address": "9 Nevada St, London SE10 9JL",
+    "postcode": "SE10 9JL",
+    "venue_type": "jazz bar",
+    "has_newsletter": false
+  },
+  {
+    "name": "Truman Brewery",
+    "url": "https://www.trumanbrewery.com/web/whats-on.pl",
+    "address": "Truman Brewery 91 Brick Lane London E1 6QL",
+    "postcode": "E1 6QL",
+    "venue_type": "events space",
+    "has_newsletter": true,
+    "signed_up": true
+  },
+  {
+    "name": "St Alfege Church",
+    "url": "https://www.st-alfege.org.uk/Groups/298240/Whats_on.aspx",
+    "address": "St Alfege Church, Greenwich Church Street, London SE10 9BJ",
+    "postcode": "SE10 9BJ",
+    "venue_type": "church",
+    "has_newsletter": true,
+    "signed_up": true
+  },
+  {
+    "name": "Hackney Wick Community Sauna",
+    "url": "https://www.community-sauna.co.uk/events",
+    "address": "The Baths 80, Eastway, London E9 5JH",
+    "postcode": "E9 5JH",
+    "venue_type": "sauna",
+    "has_newsletter": true,
+    "signed_up": true
+  },
+  {
+    "name": "The Old Blue Last",
+    "url": "https://www.theoldbluelast.com/",
+    "address": "38 Great Eastern St, London EC2A 3ES",
+    "postcode": "EC2A 3ES",
+    "venue_type": "pub",
+    "has_newsletter": true,
+    "signed_up": true
+  },
+  {
+    "name": "The Book Club",
+    "url": "https://www.wearetbc.com/whats-on/",
+    "address": "100-106 Leonard St, London EC2A 4RH",
+    "postcode": "EC2A 4RH",
+    "venue_type": "bar",
+    "has_newsletter": true,
+    "signed_up": true
+  },
+  {
+    "name": "The Yard Theatre",
+    "url": "https://www.theyardtheatre.co.uk/",
+    "address": "Unit 2a, Queen’s Yard, White Post Lane, London E9 5EN",
+    "postcode": "E9 5EN",
+    "venue_type": "theatre",
+    "has_newsletter": true,
+    "signed_up": true
+  },
+  {
+    "name": "Moth Club",
+    "url": "https://mothclub.co.uk/",
+    "address": "Old Trades Hall Valette Street E9 6NU",
+    "postcode": "E9 6NU",
+    "venue_type": "bar",
+    "has_newsletter": true,
+    "signed_up": true
+  },
+  {
+    "name": "Museum of the Home",
+    "url": "https://www.museumofthehome.org.uk/whats-on/events/",
+    "address": "136 Kingsland Road London E2 8EA",
+    "postcode": "E2 8EA",
+    "venue_type": "museum",
+    "has_newsletter": true,
+    "signed_up": true
+  },
+  {
+    "name": "The Jago",
+    "url": "https://www.thejagodalston.com/",
+    "address": "440 Kingsland Road Dalston London E8 4AA",
+    "postcode": "E8 4AA",
+    "venue_type": "music bar",
+    "has_newsletter": true,
+    "signed_up": true
+  },
+  {
+    "name": "The Working Men's Club",
+    "url": "https://workersplaytime.net/THISWEEK.htm",
+    "address": "BGWMC 42-46 POLLARD ROW LONDON E26NB",
+    "postcode": "E2 6NB",
+    "venue_type": "cabaret club",
+    "has_newsletter": true,
+    "signed_up": true
+  },
+  {
+    "name": "NT’s Loft",
+    "address": "1 Westgate Street, London Fields, Hackney, London, E8 3RL",
+    "postcode": "E8 3RL",
+    "url": "https://www.ntloft.co.uk/",
+    "venue_type": "music bar and club",
+    "has_newsletter": true,
+    "signed_up": true
+  },
+  {
+    "name": "Shoreditch Townhouse",
+    "address": "6-8 Beaufoy Walk, London, E1 7NR",
+    "postcode": "E1 7NR",
+    "url": "https://shoreditchtownhouse.com/",
+    "venue_type": "bar and restaurant",
+    "has_newsletter": false
+  },
+  {
+    "name": "The Macbeth",
+    "address": "70 Hoxton Street, London, N1 6LP",
+    "postcode": "N1 6LP",
+    "url": "https://the-macbeth.co.uk/events/",
+    "venue_type": "pub and live music",
+    "has_newsletter": false
+  },
+  {
+    "name": "Rio Cinema",
+    "address": "107 Kingsland High Street, London, E8 2PB",
+    "postcode": "E8 2PB",
+    "url": "https://riocinema.org.uk/",
+    "venue_type": "cinema",
+    "has_newsletter": true,
+    "signed_up": true
+  },
+  {
+    "name": "Arcola Theatre",
+    "address": "24 Ashwin Street, London, E8 3DL",
+    "postcode": "E8 3DL",
+    "url": "https://arcolatheatre.com/",
+    "venue_type": "theatre",
+    "has_newsletter": true,
+    "signed_up": false
+  },
+  {
+    "name": "Victoria Miro Gallery",
+    "address": "16 Wharf Road, London, N1 7RW",
+    "postcode": "N1 7RW",
+    "url": "https://www.victoria-miro.com/",
+    "venue_type": "art gallery",
+    "has_newsletter": true,
+    "signed_up": true
+  },
+  {
+    "name": "CellarDoor",
+    "address": "Zero Aldwych, London, WC2E 7DN",
+    "postcode": "WC2E 7DN",
+    "url": "https://www.cellardoor.biz/",
+    "venue_type": "cabaret & cocktail bar",
+    "has_newsletter": false
+  },
+  {
+    "name": "Battersea Barge",
+    "address": "Nine Elms Lane, London, SW8 5BP",
+    "postcode": "SW8 5BP",
+    "url": "https://www.batterseabarge.com/",
+    "venue_type": "floating cabaret venue",
+    "has_newsletter": false
+  },
+  {
+    "name": "The Black Cat Cabaret",
+    "address": "20 Sherwood Street, London, W1F 7ED",
+    "postcode": "W1F 7ED",
+    "url": "https://www.theblackcat.info/",
+    "venue_type": "Cabaret and performance space",
+    "has_newsletter": false
   }
 ]
