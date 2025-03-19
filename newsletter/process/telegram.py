@@ -244,6 +244,7 @@ def main():
     2. Broadcast mode: Send the latest newsletter to all subscribers
     """
     # # Check if we should run in broadcast mode
+    # TODO: broadcast mode true / need checks in place to ensure we don't spam users
     # if os.getenv("BROADCAST_MODE", "").lower() == "true":
     #     logger.info("Running in broadcast mode.")
     #     broadcast_latest_newsletter()
