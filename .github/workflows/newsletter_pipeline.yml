@@ -1,26 +1,31 @@
-name: Newsletter Processing and Distribution Pipeline
+name: Newsletter Pipeline
 
 on:
+  # 1) Create a dev newsletter on push to main
   push:
-    branches:
-      - main
+    branches: [ 'main' ]
+
+  # 2) Create a production newsletter at Saturday 7 AM UTC
   schedule:
-    - cron: '0 1 * * 0'  # Once every week on Sunday at 1am UTC
+    - cron: '0 7 * * 6'
+
+  # 3) Manual run
   workflow_dispatch:
 
 jobs:
-  process-and-distribute-newsletter:
+  create-newsletter:
     runs-on: ubuntu-latest
 
     env:
       SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
       SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-      BROADCAST_MODE: "true"
+      # We'll dynamically set IS_DEV below depending on the event
+      IS_DEV: "false"
+
 
     steps:
-      - name: Checkout code
+      - name: Check out code
         uses: actions/checkout@v4
 
       - name: Set up Python
@@ -36,19 +41,36 @@ jobs:
       - name: Install dependencies
         run: poetry install --no-interaction --no-root
 
-      - name: Setup environment variables
+      - name: Determine environment (dev vs. production)
+        id: check-env
         run: |
-          echo "SUPABASE_URL=$SUPABASE_URL" > .env
-          echo "SUPABASE_KEY=$SUPABASE_KEY" >> .env
-          echo "OPENAI_API_KEY=$OPENAI_API_KEY" >> .env
-          echo "TELEGRAM_BOT_TOKEN=$TELEGRAM_BOT_TOKEN" >> .env
-          echo "BROADCAST_MODE=true" >> .env
+          # Default to nothing
+          echo "IS_DEV=" >> $GITHUB_ENV
 
-      - name: Run newsletter processing script
-        run: poetry run python -m newsletter.process.newsletter
+          # If we pushed to main => dev newsletter
+          if [ "${{ github.event_name }}" = "push" ]; then
+            echo "IS_DEV=true" >> $GITHUB_ENV
+            echo "Dev newsletter creation."
+          # If it's schedule => production newsletter
+          elif [ "${{ github.event_name }}" = "schedule" ]; then
+            CURRENT_HOUR=$(date -u +"%H")
+            CURRENT_DAY_OF_WEEK=$(date -u +"%u")
+            # Saturday at 7 AM => production
+            if [ "$CURRENT_DAY_OF_WEEK" = "6" ] && [ "$CURRENT_HOUR" = "07" ]; then
+              echo "IS_DEV=false" >> $GITHUB_ENV
+              echo "Production newsletter creation."
+            else
+              echo "No newsletter creation needed at this time."
+            fi
+          else
+            echo "No newsletter creation needed."
+          fi
 
-      - name: Broadcast newsletter to Telegram subscribers
-        run: poetry run python -m newsletter.process.telegram
+      - name: Create newsletter (only if IS_DEV is set)
+        if: env.IS_DEV != ''
+        run: |
+          echo "Creating newsletter with IS_DEV=${IS_DEV}"
+          poetry run python -m newsletter.process.newsletter
 
       - name: Log completion
-        run: echo "Newsletter processing and distribution completed at $(date)"
+        run: echo "Finished at $(date)"

@@ -1,3 +1,4 @@
+import argparse
 import os
 import json
 import logging
@@ -10,10 +11,17 @@ from dotenv import load_dotenv
 load_dotenv()
 
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
+logger.setLevel(logging.DEBUG)
+
+if not logger.hasHandlers():
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(logging.Formatter("[%(levelname)s] %(message)s"))
+    logger.addHandler(console_handler)
+
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+IS_DEV = os.getenv("IS_DEV", "true").lower() == "true"
 
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
@@ -256,20 +264,22 @@ def generate_newsletter_text(events: t.List[t.Dict[str, t.Any]]) -> str:
         return "(Failed to generate newsletter text.)"
 
 
-def create_newsletter_record(body: str) -> int:
+def create_newsletter_record(body: str, is_dev: bool) -> int:
     """
-    Inserts one row into `newsletter` with the summarised text block as `body`.
-    Returns the newly created newsletter.id.
+    Inserts a single newsletter row into the 'newsletter' table
+    with the summarised text block as `body` and the `is_dev` flag.
+    Returns the newly created newsletter.id (integer).
     """
     try:
-        current_date = datetime.datetime.now().isoformat()
+        current_date = datetime.datetime.utcnow().isoformat()
         response = supabase.table("newsletter").insert({
             "body": body,
-            "created_date": current_date
+            "created_date": current_date,
+            "is_dev": is_dev
         }).execute()
         new_record = response.data[0]
         newsletter_id = new_record["id"]
-        logger.info(f"Created newsletter row with id={newsletter_id}")
+        logger.info(f"Created {'dev' if is_dev else 'production'} newsletter row with id={newsletter_id}")
         return newsletter_id
     except Exception as exc:
         logger.error(f"Failed to insert newsletter record: {exc}")
@@ -297,43 +307,53 @@ def add_events_to_newsletter(newsletter_id: int, events: t.List[t.Dict[str, t.An
         logger.error(f"Failed to insert into newsletter_events: {exc}")
 
 
-def main():
-    # 1) Fetch recent events (from last 7 days or per your logic), including sender_name
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Generate a newsletter.")
+    parser.add_argument("--dev", action="store_true", help="Create a dev newsletter if set.")
+    return parser.parse_args()
+
+
+def main(min_event_count: int = 8, max_event_count: int = 15) -> None:
+    args = parse_args()
+
+    is_dev = True if args.dev else IS_DEV
+    logger.info(f"Running newsletter pipeline. is_dev={is_dev}")
+
+    if is_dev:
+        min_event_count = 1
+        max_event_count = 50
+
+    # 1) Fetch recent events
     recent_events = fetch_events_last_7_days()
-
-    # 2) Filter out recurring or already-past events
+    # 2) Filter out recurring or used events
     filtered_events = filter_non_recurring_upcoming(recent_events)
-
-    # 3) Use AI to score each event's "interestingness"
+    # 3) Score with AI
     scored_events = score_events_with_ai(filtered_events)
-
-    # 4) Keep at most two events per venue
+    # 4) Limit to 2 per venue
     limited_by_venue = limit_two_per_venue(scored_events)
-
-    # 5) Apply a hard limit of 10 events for the newsletter
-    final_events = limited_by_venue[:10]
+    # 5) Hard limit
+    final_events = limited_by_venue[:max_event_count]
 
     logger.info("=== Selected Events ===")
     for e in final_events:
-        try:
-            logger.info(
-                f"Score {e['rating']}: {e['title']} by {e.get('sender_name') or 'Unknown Sender'}"
-                f" @ {e['location']} on {e['event_start_date']}"
-            )
-            print(e)
-        except:
-            continue
+        logger.info(
+            f"Score {e['rating']}: {e['title']} by {e.get('sender_name') or 'Unknown Sender'}"
+            f" @ {e['location']} on {e['event_start_date']}"
+        )
 
-    # 6) Generate one cohesive text block from final_events
+    if len(final_events) < min_event_count:
+        # Not enough events => do not create newsletter
+        logger.info(f"Skipping newsletter creation; found only {len(final_events)} events (< {min_event_count}).")
+        return
+
+    # 6) Generate text
     newsletter_text = generate_newsletter_text(final_events)
-    logger.info("Newsletter text:\n" + newsletter_text)
 
-    # 7) Insert a single row into `newsletter` (returns newsletter_id)
-    newsletter_id = create_newsletter_record(newsletter_text)
+    # 7) Insert a newsletter row
+    newsletter_id = create_newsletter_record(newsletter_text, is_dev=is_dev)
 
-    # 8) Insert each final event into `newsletter_events` referencing that newsletter_id
+    # 8) Add those events to newsletter_events
     add_events_to_newsletter(newsletter_id, final_events)
-
     logger.info("Newsletter pipeline complete.")
 
 

@@ -19,152 +19,240 @@ TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
+# ---------------------------------------------------------------------
+# Newsletter Data Retrieval/Storage
+# ---------------------------------------------------------------------
 
-def get_latest_newsletter() -> ta.Optional[ta.Dict[str, ta.Any]]:
-    """
-    Retrieves the latest newsletter entry from the database that was created in the last day.
-    Returns None if no recent newsletter is found.
-    """
-    one_day_ago = (datetime.datetime.now() - datetime.timedelta(days=1)).isoformat()
-
+def get_newsletter_by_id(nl_id: int) -> ta.Optional[ta.Dict[str, ta.Any]]:
+    """Fetch a single newsletter by primary key."""
     try:
-        response = (
-            supabase
-            .table("newsletter")
+        resp = (
+            supabase.table("newsletter")
             .select("*")
-            .gte("created_date", one_day_ago)
+            .eq("id", nl_id)
+            .single()
+            .execute()
+        )
+        return resp.data
+    except Exception as exc:
+        logger.error(f"Failed to fetch newsletter {nl_id}: {exc}")
+        return None
+
+def get_latest_newsletter(is_dev: bool = False, lookback_days: int = 7) -> ta.Optional[ta.Dict[str, ta.Any]]:
+    """
+    Returns the most recently created newsletter within `lookback_days`.
+    Defaults to `is_dev=False` (production).
+    """
+    cutoff = (datetime.datetime.utcnow() - datetime.timedelta(days=lookback_days)).isoformat()
+    try:
+        resp = (
+            supabase.table("newsletter")
+            .select("*")
+            .eq("is_dev", is_dev)
+            .gte("created_date", cutoff)
             .order("created_date", desc=True)
             .limit(1)
             .execute()
         )
-
-        data = response.data
-        if data and len(data) > 0:
-            logger.info(f"Retrieved latest newsletter with ID: {data[0]['id']}")
-            return data[0]
-        else:
-            logger.info("No newsletter found from the last day.")
-            return None
-
+        rows = resp.data or []
+        return rows[0] if rows else None
     except Exception as exc:
-        logger.error(f"Failed to retrieve latest newsletter: {exc}")
+        logger.error(f"Failed to retrieve latest newsletter (is_dev={is_dev}): {exc}")
         return None
 
+def newsletter_already_broadcast(nl_id: int) -> bool:
+    """
+    Checks if newsletter has already been broadcast
+    by looking for a record in 'newsletter_broadcast'.
+    """
+    try:
+        resp = (
+            supabase.table("newsletter_broadcast")
+            .select("id")
+            .eq("newsletter_id", nl_id)
+            .execute()
+        )
+        return bool(resp.data)  # True if any record
+    except Exception as exc:
+        logger.error(f"Error checking broadcast history: {exc}")
+        return True  # fail-safe => treat as already broadcast
+
+def mark_newsletter_broadcasted(nl_id: int, success: bool) -> None:
+    """
+    Inserts a record to mark that we broadcasted the newsletter (success/fail).
+    """
+    try:
+        supabase.table("newsletter_broadcast").insert({
+            "newsletter_id": nl_id,
+            "sent_at": datetime.datetime.utcnow().isoformat(),
+            "success": success
+        }).execute()
+        logger.info(f"Marked newsletter {nl_id} as broadcasted (success={success}).")
+    except Exception as exc:
+        logger.error(f"Failed to mark newsletter broadcast: {exc}")
+
+# ---------------------------------------------------------------------
+# Telegram Logic
+# ---------------------------------------------------------------------
 
 def send_telegram_message(chat_id: str, text: str) -> bool:
-    """
-    Sends a message to a Telegram chat using the Telegram Bot API.
-    Returns True if successful, False otherwise.
-    """
+    """Send a message to a Telegram user/channel."""
     if not TELEGRAM_BOT_TOKEN:
         logger.error("Telegram bot token not configured.")
         return False
 
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-
-    # Telegram messages have a 4096 character limit
-    # If the message is longer, we'll split it into multiple messages
-    max_length = 4000  # Slightly less than the actual limit for safety
-
-    # Split the message if it's too long
-    message_parts = [text[i:i + max_length] for i in range(0, len(text), max_length)]
-
+    max_length = 4000
+    parts = [text[i:i + max_length] for i in range(0, len(text), max_length)]
     success = True
-    for part in message_parts:
+
+    for part in parts:
         payload = {
             "chat_id": chat_id,
             "text": part,
             "parse_mode": "HTML"
         }
-
         try:
-            response = requests.post(url, json=payload)
-            if response.status_code != 200:
-                logger.error(f"Failed to send Telegram message: {response.text}")
+            resp = requests.post(url, json=payload)
+            if resp.status_code != 200:
+                logger.error(f"Failed to send message to {chat_id}: {resp.text}")
                 success = False
             else:
-                logger.info(f"Telegram message sent successfully to chat {chat_id}.")
+                logger.info(f"Sent message to chat {chat_id}")
         except Exception as exc:
-            logger.error(f"Error sending Telegram message: {exc}")
+            logger.error(f"Error sending message: {exc}")
             success = False
 
     return success
 
-
 def derive_newsletter_index() -> int:
-    response = supabase.table("newsletter_events").select("newsletter_id, event_id").execute()
-
-    newsletter_events = defaultdict(set)
-    for row in response.data:
-        newsletter_events[row["newsletter_id"]].add(row["event_id"])
-
-    unique_event_sets = {frozenset(event_set) for event_set in newsletter_events.values()}
-    return len(unique_event_sets)
-
-
-def format_newsletter_for_telegram(newsletter: ta.Dict[str, ta.Any]) -> str:
     """
-    Formats the newsletter content for Telegram.
-    Basic HTML formatting is supported.
+    Count how many distinct sets of event_ids have been used across *production* newsletters.
     """
-    body = newsletter.get("body", "")
+    try:
+        resp_newsletters = (
+            supabase.table("newsletter")
+            .select("id")
+            .eq("is_dev", False)
+            .execute()
+        )
+        production_ids = {row["id"] for row in (resp_newsletters.data or [])}
+        if not production_ids:
+            return 0
 
+        resp_events = (
+            supabase.table("newsletter_events")
+            .select("newsletter_id, event_id")
+            .in_("newsletter_id", list(production_ids))
+            .execute()
+        )
+
+        newsletter_events = defaultdict(set)
+        for row in (resp_events.data or []):
+            newsletter_events[row["newsletter_id"]].add(row["event_id"])
+
+        unique_event_sets = {frozenset(s) for s in newsletter_events.values()}
+        return len(unique_event_sets)
+    except Exception as exc:
+        logger.error(f"Error deriving newsletter index: {exc}")
+        return 0
+
+def format_newsletter_for_telegram(nl: ta.Dict[str, ta.Any]) -> str:
+    """Adds a heading (with newsletter index) above the body text."""
+    body = nl.get("body", "")
     issue_number = derive_newsletter_index()
-
-    # Add a header
     header = f"<b>📅 EVENTS NEWSLETTER VOL. #{issue_number}</b>\n\n"
+    return header + body
 
-    # Format the body - replace newlines with HTML line breaks if needed
-    formatted_text = header + body
+def broadcast_production_newsletter():
+    """
+    1) Grab the latest production newsletter
+    2) If not broadcast, broadcast it to all subscribers
+    3) Mark as broadcast in DB
+    """
+    newsletter = get_latest_newsletter(is_dev=False)
+    if not newsletter:
+        logger.info("No recent production newsletter found. Skipping auto-broadcast.")
+        return
 
-    return formatted_text
+    nl_id = newsletter["id"]
+    if newsletter_already_broadcast(nl_id):
+        logger.info(f"Newsletter {nl_id} was already broadcast. Skipping.")
+        return
 
+    logger.info(f"Broadcasting newsletter {nl_id} to all subscribers...")
+    text = format_newsletter_for_telegram(newsletter)
+    success = True
 
-def get_telegram_updates(offset: int = None) -> ta.List[ta.Dict]:
+    try:
+        resp = supabase.table("telegram_subscribers").select("chat_id").execute()
+        subscribers = resp.data or []
+        for sub in subscribers:
+            c_id = sub.get("chat_id")
+            if c_id:
+                ok = send_telegram_message(c_id, text)
+                if not ok:
+                    success = False
+            time.sleep(0.1)  # small rate-limit delay
+    except Exception as exc:
+        logger.error(f"Error during broadcast: {exc}")
+        success = False
+
+    mark_newsletter_broadcasted(nl_id, success)
+
+# ---------------------------------------------------------------------
+# Handling Telegram Updates (Commands)
+# ---------------------------------------------------------------------
+
+def get_telegram_updates(offset: ta.Optional[int] = None) -> ta.List[ta.Dict]:
+    """Poll new updates from Telegram."""
+    if not TELEGRAM_BOT_TOKEN:
+        logger.error("TELEGRAM_BOT_TOKEN not configured.")
+        return []
+
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/getUpdates"
     params = {"timeout": 30}
-    if offset:
+    if offset is not None:
         params["offset"] = offset
 
     try:
-        response = requests.get(url, params=params)
-        if response.status_code == 200:
-            return response.json().get('result', [])
+        r = requests.get(url, params=params)
+        if r.status_code == 200:
+            return r.json().get('result', [])
         else:
-            logger.error(f"Failed to get updates: {response.text}")
+            logger.error(f"Failed to get updates: {r.text}")
             return []
     except Exception as exc:
         logger.error(f"Error getting updates: {exc}")
         return []
 
-
-def process_message(message: ta.Dict) -> None:
-    chat_id = message.get('chat', {}).get('id')
-    text = message.get('text', '').lower()
+def process_message(msg: dict):
+    chat_id = str(msg.get('chat', {}).get('id', ''))
+    text = (msg.get('text') or '').lower().strip()
 
     if not chat_id:
         return
 
+    # Ensure user is subscribed (or gets added)
     try:
-        response = (
-            supabase
-            .table("telegram_subscribers")
-            .select("*")
-            .eq("chat_id", str(chat_id))
+        existing = (
+            supabase.table("telegram_subscribers")
+            .select("id")
+            .eq("chat_id", chat_id)
             .execute()
         )
-
-        if not response.data:
+        if not existing.data:
             supabase.table("telegram_subscribers").insert({
-                "chat_id": str(chat_id),
-                "subscribed_date": datetime.datetime.now().isoformat()
+                "chat_id": chat_id,
+                "subscribed_date": datetime.datetime.utcnow().isoformat()
             }).execute()
-            logger.info(f"Added new subscriber: {chat_id}")
+            logger.info(f"New subscriber added: {chat_id}")
     except Exception as exc:
-        logger.error(f"Error managing subscription: {exc}")
+        logger.error(f"Error adding subscriber: {exc}")
 
-    if text.lower() in ['/start', '/help', 'hello', 'hi', 'help', '?']:
-        welcome_msg = (
+    # Commands:
+    if text in ['/start', '/help', 'hello', 'hi', '?']:
+        help_text = (
             "Welcome to Niche London Events! 👋\n\n"
             "I curate a weekly newsletter about local and low-key London events. No, you won't find these on Time Out.\n"
             "Here are my commands:\n"
@@ -172,115 +260,71 @@ def process_message(message: ta.Dict) -> None:
             "/subscribe - Subscribe to receive newsletters\n"
             "/unsubscribe - Unsubscribe from newsletters"
         )
-        send_telegram_message(chat_id, welcome_msg)
+        send_telegram_message(chat_id, help_text)
 
     elif text == '/latest':
-        newsletter = get_latest_newsletter()
+        newsletter = get_latest_newsletter(is_dev=False)
         if newsletter:
-            formatted_message = format_newsletter_for_telegram(newsletter)
-            send_telegram_message(chat_id, formatted_message)
+            msg_text = format_newsletter_for_telegram(newsletter)
+            send_telegram_message(chat_id, msg_text)
         else:
-            send_telegram_message(chat_id, "Sorry, I don't have any recent newsletters to share.")
+            send_telegram_message(chat_id, "No recent production newsletter found.")
+
+    elif text == '/latest-dev':
+        # Hidden command for latest newsletter
+        newsletter = get_latest_newsletter(is_dev=True)
+        if newsletter:
+            msg_text = format_newsletter_for_telegram(newsletter)
+            send_telegram_message(chat_id, msg_text)
+        else:
+            send_telegram_message(chat_id, "No recent dev newsletter found.")
 
     elif text == '/subscribe':
-        send_telegram_message(chat_id, "You've been subscribed to receive event newsletters! 🎉")
+        send_telegram_message(chat_id, "You are subscribed. You'll receive the weekly broadcast.")
 
     elif text == '/unsubscribe':
         try:
-            supabase.table("telegram_subscribers").delete().eq("chat_id", str(chat_id)).execute()
-            send_telegram_message(chat_id,
-                                  "You've been unsubscribed from the newsletter. You can subscribe again anytime with /subscribe.")
+            supabase.table("telegram_subscribers").delete().eq("chat_id", chat_id).execute()
+            send_telegram_message(chat_id, "You've been unsubscribed.")
         except Exception as exc:
             logger.error(f"Error unsubscribing: {exc}")
-            send_telegram_message(chat_id, "There was an error processing your request. Please try again later.")
-
+            send_telegram_message(chat_id, "Error unsubscribing. Please try again later.")
     else:
-        send_telegram_message(chat_id,
-                              "I don't understand that command. Try /latest to get the latest newsletter or /subscribe to subscribe.")
+        send_telegram_message(chat_id, "Unrecognized command. Try /latest or /help.")
 
-
-def broadcast_latest_newsletter():
-    """
-    Send the latest newsletter to all subscribers.
-    """
-    newsletter = get_latest_newsletter()
-    if not newsletter:
-        logger.info("No recent newsletter found. Not sending broadcast.")
-        return
-
-    # Format the newsletter for Telegram
-    formatted_message = format_newsletter_for_telegram(newsletter)
-
-    # Get all subscribers
-    try:
-        response = supabase.table("telegram_subscribers").select("chat_id").execute()
-        subscribers = response.data
-
-        if not subscribers:
-            logger.info("No subscribers found. Not sending broadcast.")
-            return
-
-        logger.info(f"Broadcasting newsletter to {len(subscribers)} subscribers.")
-
-        # Send to each subscriber
-        for subscriber in subscribers:
-            chat_id = subscriber.get("chat_id")
-            if chat_id:
-                success = send_telegram_message(chat_id, formatted_message)
-                if not success:
-                    logger.error(f"Failed to send newsletter to {chat_id}")
-                # Avoid hitting Telegram's rate limits
-                time.sleep(0.1)
-
-        logger.info("Broadcast complete.")
-    except Exception as exc:
-        logger.error(f"Error broadcasting newsletter: {exc}")
-
+# ---------------------------------------------------------------------
+# Main: Always Running, Weekly Broadcast at Saturday 9 AM UTC
+# ---------------------------------------------------------------------
 
 def main():
-    """
-    Main function to run the bot. It can work in two modes:
-    1. Interactive mode: Process incoming messages from users
-    2. Broadcast mode: Send the latest newsletter to all subscribers
-    """
-    # # Check if we should run in broadcast mode
-    # TODO: broadcast mode true / need checks in place to ensure we don't spam users
-    # if os.getenv("BROADCAST_MODE", "").lower() == "true":
-    #     logger.info("Running in broadcast mode.")
-    #     broadcast_latest_newsletter()
-    #     return
+    logger.info("Bot started. Always running, polling for commands...")
+    offset = None  # track the last update_id
 
-    # Otherwise, run in interactive mode
-    logger.info("Running in interactive mode. Listening for messages...")
-
-    # Keep track of the last update ID we've processed
-    last_update_id = None
-
-    # Main polling loop
     while True:
-        try:
-            updates = get_telegram_updates(last_update_id)
+        # 1) Poll for new updates
+        updates = get_telegram_updates(offset)
+        for upd in updates:
+            update_id = upd.get('update_id')
+            if update_id is not None:
+                offset = update_id + 1
 
-            for update in updates:
-                update_id = update.get('update_id')
+            message = upd.get('message')
+            if message:
+                process_message(message)
 
-                # Update the last_update_id to acknowledge this update
-                if update_id:
-                    last_update_id = update_id + 1
+        # 2) Check if it's Saturday at 9 AM UTC => broadcast
+        now_utc = datetime.datetime.utcnow()
+        # weekday(): Monday=0 ... Sunday=6, so Saturday=5
+        if now_utc.weekday() == 5 and now_utc.hour == 9:
+            # Attempt broadcast. If the newsletter is already broadcast, no duplicate is sent.
+            logger.info("Detected Saturday 9 AM UTC. Attempting auto-broadcast...")
+            broadcast_production_newsletter()
 
-                message = update.get('message')
-                if message:
-                    process_message(message)
+            # Sleep for a while so we don't keep re-checking every loop within 9:00 hour
+            # (The DB also prevents duplicates, but let's avoid spamming logs or repeated checks)
+            time.sleep(3600)  # 1 hour
 
-            # Sleep briefly to avoid hammering the API
-            time.sleep(1)
-        except KeyboardInterrupt:
-            logger.info("Bot stopped by user.")
-            break
-        except Exception as exc:
-            logger.error(f"Error in main loop: {exc}")
-            time.sleep(5)
-
+        time.sleep(3)  # short delay to prevent busy looping
 
 if __name__ == "__main__":
     main()
