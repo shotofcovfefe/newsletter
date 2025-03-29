@@ -11,8 +11,12 @@ class Event(BaseModel):
     event_type: str
     description: str
     description_verbatim: str
+    is_event_course: ta.Optional[bool] = None
     is_event_recurring: ta.Optional[bool] = None
     event_recur_freq: ta.Optional[str] = None
+    llm_rating: ta.Optional[int] = None
+    event_time_of_day: ta.Optional[str] = None
+    venue_name: ta.Optional[str] = None
 
 
 class Events(BaseModel):

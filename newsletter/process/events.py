@@ -20,8 +20,8 @@ client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 def extract_events(email_body: str, email_sent_date: str) -> ta.List[Event]:
     """
-    Uses GPT-4o to parse the email content and extract structured event data.
-    Instruct GPT to:
+    Uses an LLM to parse the email content and extract structured event data.
+    Instruct LLM to:
     - Exclude company name from the `title`.
     - Attempt best-effort to parse event_start_date/event_end_date using email_sent_date as a reference.
     - If it's impossible to deduce a date, return null.
@@ -33,13 +33,17 @@ The email was sent on {email_sent_date} (YYYY-MM-DD).
 You will return a JSON list of objects, each containing these fields:
     - title (string): A concise event title (without any company names, capitalised first letter no full stop)
     - event_start_date (date | null) 
-    - event_end_date (date | null)
+    - event_end_date (date | null) 
     - location (string): 'on-site', 'off-site', 'online', 'unknown'
     - event_type (string): Keep it simple (e.g., 'Meetup', 'Conference', 'Film screening', etc.).
-    - description (string): A concise summary of the event.
+    - description (string): A concise summary of the event (for example `A hybrid feature film exploring autistic perspectives and perception, directed by The Neurocultures Collective.`
     - description_verbatim (string): A verbatim extraction of the event from the email.
-    - is_event_recurring (boolean)
+    - is_event_course (boolean): Is the event actually a course (vs one off or recurring) that takes place over multiple sessions 
+    - is_event_recurring (boolean | null)
     - event_recur_freq (string | null): e.g., 'weekly', 'monthly', etc. If not recurring, null.
+    - llm_rating (int): assign an 'interest score' / rating (1-10) to each event, based on: 1) Novelty or uniqueness, 2. Broad appeal. 3. Fun or entertainment value. A score of 1 indicates minimal interest or excitement, while 10 indicates an extremely compelling or can't-miss event. Penalise if not a one off event.     
+    - event_time_of_day (text): the time of the event on the day (either `early morning`, `late morning`, `afternoon`, `evening`, `night`), if multiple times, then mark as null.  
+    - venue_name (string | null): The name of the inferred venue hosting the events, if at all extractable (for example, "Ben's Bookstore", "Loafing Cafe"). If it's not obviously extactable, return null). If the venue name is not given on the event itself, it's likely that the venue is the emailer or that it's contained elsewhere in the newsletter, if not don't force it (accuracy is key).  
 
 Deducing Dates:
     - If the email says "next Friday" or "tomorrow," interpret relative to {email_sent_date}.
@@ -62,6 +66,7 @@ No text outside of valid JSON.
             temperature=0.2,
         )
         raw_json = completion.choices[0].message.content.strip()
+        raw_json = raw_json.lstrip('```json\n').strip('\n').rstrip('```')
 
         # Convert JSON string into Python structures
         data = json.loads(raw_json)
@@ -75,8 +80,6 @@ No text outside of valid JSON.
         events = []
         for item in data:
             try:
-                # Convert event_start_date / event_end_date from string → date (if not null)
-                # Or let Pydantic parse automatically if item["event_start_date"] is str or None
                 events.append(Event(**item))
             except Exception as e:
                 logger.error(f"Could not parse an event item: {item} => {e}")
@@ -121,12 +124,11 @@ def main() -> None:
             email_sent_date_str = email_rec.get("date", "")
             # Format to YYYY-MM-DD if possible
             try:
-                # Try parsing. You can adapt the format if needed.
                 dt = datetime.fromisoformat(email_sent_date_str)
                 email_sent_date_str = dt.strftime("%Y-%m-%d")
             except ValueError:
-                # If we can't parse, just pass it raw or fallback to today
-                email_sent_date_str = email_sent_date_str or datetime.now().strftime("%Y-%m-%d")
+                # If we can't parse, don't give a date
+                pass
 
             # Extract event details
             events_data = extract_events(body, email_sent_date_str)

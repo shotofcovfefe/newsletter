@@ -8,6 +8,8 @@ from collections import defaultdict
 from supabase import create_client
 from dotenv import load_dotenv
 
+from newsletter.utils import haversine_distance, is_valid_uk_postcode, geocode_postcode_to_latlon
+
 load_dotenv()
 
 logger = logging.getLogger(__name__)
@@ -38,7 +40,11 @@ def get_newsletter_by_id(nl_id: int) -> ta.Optional[ta.Dict[str, ta.Any]]:
         logger.error(f"Failed to fetch newsletter {nl_id}: {exc}")
         return None
 
-def get_latest_newsletter(is_dev: bool = False, lookback_days: int = 7) -> ta.Optional[ta.Dict[str, ta.Any]]:
+
+def get_latest_newsletter(
+    is_dev: bool = False,
+    lookback_days: int = 7
+) -> ta.Optional[ta.Dict[str, ta.Any]]:
     """
     Returns the most recently created newsletter within `lookback_days`.
     Defaults to `is_dev=False` (production).
@@ -60,6 +66,7 @@ def get_latest_newsletter(is_dev: bool = False, lookback_days: int = 7) -> ta.Op
         logger.error(f"Failed to retrieve latest newsletter (is_dev={is_dev}): {exc}")
         return None
 
+
 def newsletter_already_broadcast(nl_id: int) -> bool:
     """
     Checks if newsletter has already been broadcast
@@ -77,6 +84,7 @@ def newsletter_already_broadcast(nl_id: int) -> bool:
         logger.error(f"Error checking broadcast history: {exc}")
         return True  # fail-safe => treat as already broadcast
 
+
 def mark_newsletter_broadcasted(nl_id: int, success: bool) -> None:
     """
     Inserts a record to mark that we broadcasted the newsletter (success/fail).
@@ -90,6 +98,7 @@ def mark_newsletter_broadcasted(nl_id: int, success: bool) -> None:
         logger.info(f"Marked newsletter {nl_id} as broadcasted (success={success}).")
     except Exception as exc:
         logger.error(f"Failed to mark newsletter broadcast: {exc}")
+
 
 # ---------------------------------------------------------------------
 # Telegram Logic
@@ -226,6 +235,95 @@ def get_telegram_updates(offset: ta.Optional[int] = None) -> ta.List[ta.Dict]:
         logger.error(f"Error getting updates: {exc}")
         return []
 
+
+# ---------------------------------------------------------------------
+# Fetch and process local events
+# ---------------------------------------------------------------------
+
+def fetch_local_events(
+    user_lat: float,
+    user_lon: float,
+    max_distance_km: float = 15.0,
+    days_ahead: int = 7
+) -> ta.List[ta.Dict[str, ta.Any]]:
+    """
+    1) Query events_enriched for events within `days_ahead`.
+    2) Calculate distance from user_lat/lon.
+    3) Filter out events farther than `max_distance_km`.
+    4) Limit to 2 events per venue.
+    5) Return top 10 by ascending distance.
+    """
+    today_str = datetime.datetime.utcnow().strftime("%Y-%m-%d")
+    future_str = (datetime.datetime.utcnow() + datetime.timedelta(days=days_ahead)).strftime("%Y-%m-%d")
+
+    # 1) Fetch from events_enriched with date window [today, future)
+    #    Make sure to convert text columns to float where needed
+    try:
+        resp = (
+            supabase
+            .table("events_enriched")
+            .select("*, venues:venue_id(name), events:event_id(title)")
+            # ^ if you have foreign key relationships set up,
+            #   so we can retrieve 'venues.name' or 'events.title'.
+            .gte("event_date", today_str)
+            .lt("event_date", future_str)
+            .execute()
+        )
+        enriched_data = resp.data or []
+    except Exception as exc:
+        logger.error(f"Error fetching local events: {exc}")
+        return []
+
+    # 2) Attach a computed distance to each row
+    for row in enriched_data:
+        ev_lat = row.get("latitude")
+        ev_lon = row.get("longitude")
+
+        # Gracefully handle if lat/lon missing or None
+        if ev_lat is None or ev_lon is None:
+            row["distance_km"] = 9999999
+        else:
+            # ensure float
+            ev_lat = float(ev_lat)
+            ev_lon = float(ev_lon)
+            dist = haversine_distance(user_lat, user_lon, ev_lat, ev_lon)
+            row["distance_km"] = dist
+
+    # 3) Filter out beyond max_distance_km if you want
+    filtered = [r for r in enriched_data if r["distance_km"] <= max_distance_km]
+
+    # 4) Limit to 2 events per venue
+    #    We'll group by row["venue_id"] (or row["venues"]["name"]) if that helps
+    final = []
+    count_by_venue = {}
+    for row in sorted(filtered, key=lambda x: x["distance_km"]):
+        v_id = row.get("venue_id") or None
+        count_so_far = count_by_venue.get(v_id, 0)
+        if count_so_far < 2:
+            final.append(row)
+            count_by_venue[v_id] = count_so_far + 1
+
+    # 5) Take top 10 overall
+    return final[:10]
+
+
+def format_local_events_message(events: ta.List[ta.Dict[str, ta.Any]], postcode: str) -> str:
+    """
+    Build a text message for the user that shows up to 10 events, sorted by distance.
+    The events_enriched.description already contains most details (title/venue/date/etc.).
+    We just append the distance with an emoji.
+    """
+    lines = [f"Events near to {postcode}:\n"]
+    for ev in events:
+        desc = ev.get("description", "").strip()
+        distance_km = ev.get("distance_km", 0.0)
+        lines.append(
+            f"\n{desc}\n"
+            f"📏 {distance_km:.1f} km away\n"
+        )
+    return "\n".join(lines)
+
+
 def process_message(msg: dict):
     chat_id = str(msg.get('chat', {}).get('id', ''))
     text = (msg.get('text') or '').lower().strip()
@@ -250,19 +348,22 @@ def process_message(msg: dict):
     except Exception as exc:
         logger.error(f"Error adding subscriber: {exc}")
 
+    help_text = (
+        "Welcome to Niche London Events! 👋\n\n"
+        "I curate a weekly newsletter about local and low-key London events. No, you won't find these on Time Out.\n"
+        "Here are my commands:\n"
+        "/latest - Get the latest newsletter\n"
+        "/subscribe - Subscribe to receive newsletters\n"
+        "/unsubscribe - Unsubscribe from newsletters"
+
+        "Or send a valid UK postcode (e.g., E8 3PN) to get local events to you!"
+    )
+
     # Commands:
     if text in ['/start', '/help', 'hello', 'hi', '?']:
-        help_text = (
-            "Welcome to Niche London Events! 👋\n\n"
-            "I curate a weekly newsletter about local and low-key London events. No, you won't find these on Time Out.\n"
-            "Here are my commands:\n"
-            "/latest - Get the latest newsletter\n"
-            "/subscribe - Subscribe to receive newsletters\n"
-            "/unsubscribe - Unsubscribe from newsletters"
-        )
         send_telegram_message(chat_id, help_text)
 
-    elif text == '/latest':
+    elif text.lower() == '/latest':
         newsletter = get_latest_newsletter(is_dev=False)
         if newsletter:
             msg_text = format_newsletter_for_telegram(newsletter)
@@ -270,7 +371,7 @@ def process_message(msg: dict):
         else:
             send_telegram_message(chat_id, "No recent production newsletter found.")
 
-    elif text == '/latest-dev':
+    elif text.lower() == '/latest-dev':
         # Hidden command for latest newsletter
         newsletter = get_latest_newsletter(is_dev=True)
         if newsletter:
@@ -279,22 +380,48 @@ def process_message(msg: dict):
         else:
             send_telegram_message(chat_id, "No recent dev newsletter found.")
 
-    elif text == '/subscribe':
+    elif text.lower() == '/subscribe':
         send_telegram_message(chat_id, "You are subscribed. You'll receive the weekly broadcast.")
 
-    elif text == '/unsubscribe':
+    elif text.lower() == '/unsubscribe':
         try:
             supabase.table("telegram_subscribers").delete().eq("chat_id", chat_id).execute()
             send_telegram_message(chat_id, "You've been unsubscribed.")
         except Exception as exc:
             logger.error(f"Error unsubscribing: {exc}")
             send_telegram_message(chat_id, "Error unsubscribing. Please try again later.")
+
     else:
-        send_telegram_message(chat_id, "Unrecognized command. Try /latest or /help.")
+        # NOT a recognized command => treat as possible postcode
+        # 1) Check if it's a valid UK postcode (pgeocode or regex)
+        text = text.upper().strip()
+        if is_valid_uk_postcode(text):
+            lat, lon = geocode_postcode_to_latlon(text)
+
+            if (lat is None) or (lon is None):
+                send_telegram_message(chat_id, "Could not geocode your postcode. Please try again!")
+                return
+
+            # 2) Fetch up to 10 local events within next 7 days
+            local_events = fetch_local_events(lat, lon, max_distance_km=15.0, days_ahead=7)
+
+            if not local_events:
+                send_telegram_message(chat_id, "No local events found in the next 7 days.")
+                return
+
+            # 3) Format them into a message
+            msg_text = format_local_events_message(local_events, text)
+            send_telegram_message(chat_id, msg_text)
+
+        else:
+            # fallback => unrecognized
+            send_telegram_message(chat_id, "Unrecognized command or invalid postcode. Try /help.")
+
 
 # ---------------------------------------------------------------------
 # Main: Always Running, Weekly Broadcast at Saturday 9 AM UTC
 # ---------------------------------------------------------------------
+
 
 def main():
     logger.info("Bot started. Always running, polling for commands...")
@@ -325,6 +452,7 @@ def main():
             time.sleep(3600)  # 1 hour
 
         time.sleep(3)  # short delay to prevent busy looping
+
 
 if __name__ == "__main__":
     main()

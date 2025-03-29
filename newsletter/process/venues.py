@@ -7,6 +7,8 @@ from dotenv import load_dotenv
 from supabase import create_client, Client
 import pgeocode
 
+from newsletter.utils import hash_prefix
+
 load_dotenv()
 
 logger = logging.getLogger(__name__)
@@ -24,7 +26,7 @@ def extract_domain(url: str) -> str:
     if not url:
         return None
     parsed = urlparse(url)
-    return parsed.netloc or None
+    return parsed.netloc.replace('www.', '') or None
 
 
 def get_lat_lon(postcode: str) -> ta.Tuple[ta.Optional[float], ta.Optional[float]]:
@@ -45,11 +47,13 @@ def main() -> None:
     for v in venues_data:
         lat, lon = get_lat_lon(v.get("postcode"))
         rows_to_insert.append({
+            "id": hash_prefix(v["name"].lower().replace(' ', '').strip()),
             "email_address": v.get("email") or None,
             "name": v["name"],
             "address": v["address"],
             "venue_type": v["venue_type"],
             "has_newsletter": v["has_newsletter"],
+            "is_generic": v.get("is_generic") or False,
             "url": v["url"],
             "domain": extract_domain(v["url"]),
             "latitude": str(lat),

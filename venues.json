@@ -80,6 +80,7 @@
     "address": "21 Old Ford Road, Bethnal Green, London E2 9PL",
     "postcode": "E2 9PL",
     "url": "https://www.stmargaretshouse.org.uk/whatson",
+    "email": "comms@stmargaretshouse.org.uk",
     "venue_type": "community center",
     "has_newsletter": true,
     "signed_up": true
@@ -183,6 +184,7 @@
     "address": "Stoke Newington Church Street, Hackney, London N16 9ES, UK",
     "postcode": "N16 9ES",
     "url": "https://www.theoldchurch.org.uk",
+    "email": "info@theoldchurch.org.uk",
     "venue_type": "arts & community venue",
     "has_newsletter": true,
     "signed_up": true
@@ -461,6 +463,7 @@
   {
     "name": "Juju's Bar",
     "address": "Ely's Yard 15 Hanbury Street London E1 6QR",
+    "email": "info@jujusbarandstage.com",
     "postcode": "E1 6QR",
     "url": "https://www.jujusbarandstage.com/",
     "venue_type": "bar",
@@ -507,6 +510,7 @@
     "address": "166 Brick Ln, London E1 6RU",
     "postcode": "E1 6RU",
     "url": "https://bricklanebookshop.org/events/",
+    "email": "info@bricklanebookshop.co.uk",
     "venue_type": "bookstore",
     "has_newsletter": true,
     "signed_up": true
@@ -557,6 +561,7 @@
     "address": " 743-745 Barking Rd, London E13 9ER",
     "postcode": "E13 9ER",
     "url": "https://www.newhambooks.co.uk/",
+    "email": "david@newhambooks.co.uk",
     "venue_type": "bookstore",
     "has_newsletter": true,
     "signed_up": true
@@ -607,6 +612,7 @@
     "name": "St Dunstan and All Saints Stepney",
     "url": "https://www.achurchnearyou.com/church/15462/",
     "address": "Stepney High St, London E1 0NR",
+    "email": "stdunstanstepney@27040931.mailchimpapp.com",
     "postcode": "E1 0NR",
     "venue_type": "church",
     "has_newsletter": true,
@@ -616,6 +622,7 @@
     "name": "The Castle Cinema",
     "url": "https://thecastlecinema.com/",
     "address": "64-66 Brooksby's Walk\nHackney, London E9 6DA",
+    "email": "hello@thecastlecinema.com",
     "postcode": "E9 6DA",
     "venue_type": "cinema",
     "has_newsletter": true,
@@ -688,6 +695,7 @@
   {
     "name": "Jamboree",
     "url": "https://www.jamboreevenue.co.uk/upcoming-events/",
+    "email": "neil@jamboreevenue.co.uk",
     "address": "6 St Chad's Pl, London WC1X 9HH",
     "postcode": "WC1X 9HH",
     "venue_type": "music bar",
@@ -707,6 +715,7 @@
     "name": "Cafe 1001",
     "url": "https://www.cafe1001.co.uk/",
     "address": "91 Brick Lane London, E1 6QL",
+    "email": "info@cafe1001.co.uk",
     "postcode": "E1 6QL",
     "venue_type": "cafe and music bar",
     "has_newsletter": true,
@@ -741,6 +750,7 @@
   {
     "name": "Hackney Wick Community Sauna",
     "url": "https://www.community-sauna.co.uk/events",
+    "email": "support@community-sauna.co.uk",
     "address": "The Baths 80, Eastway, London E9 5JH",
     "postcode": "E9 5JH",
     "venue_type": "sauna",
@@ -752,6 +762,7 @@
     "url": "https://www.theoldbluelast.com/",
     "address": "38 Great Eastern St, London EC2A 3ES",
     "postcode": "EC2A 3ES",
+    "email": "katie@theoldbluelast.com",
     "venue_type": "pub",
     "has_newsletter": true,
     "signed_up": true
@@ -770,6 +781,7 @@
     "url": "https://www.theyardtheatre.co.uk/",
     "address": "Unit 2a, Queen’s Yard, White Post Lane, London E9 5EN",
     "postcode": "E9 5EN",
+    "email": "The.Yard@arts-mail.com",
     "venue_type": "theatre",
     "has_newsletter": true,
     "signed_up": true
@@ -779,6 +791,7 @@
     "url": "https://mothclub.co.uk/",
     "address": "Old Trades Hall Valette Street E9 6NU",
     "postcode": "E9 6NU",
+    "email": "studio@lanzaroteworks.com",
     "venue_type": "bar",
     "has_newsletter": true,
     "signed_up": true
@@ -805,6 +818,7 @@
     "name": "The Working Men's Club",
     "url": "https://workersplaytime.net/THISWEEK.htm",
     "address": "BGWMC 42-46 POLLARD ROW LONDON E26NB",
+    "email": "info@workersplaytime.net",
     "postcode": "E2 6NB",
     "venue_type": "cabaret club",
     "has_newsletter": true,
@@ -838,6 +852,7 @@
   {
     "name": "Rio Cinema",
     "address": "107 Kingsland High Street, London, E8 2PB",
+    "email": "manager@riocinema.org.uk",
     "postcode": "E8 2PB",
     "url": "https://riocinema.org.uk/",
     "venue_type": "cinema",
@@ -849,6 +864,7 @@
     "address": "24 Ashwin Street, London, E8 3DL",
     "postcode": "E8 3DL",
     "url": "https://arcolatheatre.com/",
+    "email": "ArcolaTheatre@arts-mail.co.uk",
     "venue_type": "theatre",
     "has_newsletter": true,
     "signed_up": false
@@ -858,6 +874,7 @@
     "address": "16 Wharf Road, London, N1 7RW",
     "postcode": "N1 7RW",
     "url": "https://www.victoria-miro.com/",
+    "email": "info@victoria-miro.com",
     "venue_type": "art gallery",
     "has_newsletter": true,
     "signed_up": true
@@ -885,5 +902,270 @@
     "url": "https://www.theblackcat.info/",
     "venue_type": "Cabaret and performance space",
     "has_newsletter": false
+  },
+  {
+    "name": "Pretty Decent Beer",
+    "url": "https://www.bsmt.co.uk/",
+    "address": "Unit GF1, Bow Wharf, 221 Grove Rd., Old Ford, London E3 5SN",
+    "postcode": "E3 5SN",
+    "email": "info@bsmt.co.uk",
+    "email": "hello@prettydecentbeer.co",
+    "venue_type": "brewery",
+    "has_newsletter": true,
+    "signed_up": true
+  },
+
+
+
+  {
+    "name": "BSMT Gallery",
+    "url": "https://www.bsmt.co.uk/",
+    "address": "529 Kingsland Rd, London E8 4AR",
+    "postcode": "E8 4AR",
+    "venue_type": "art gallery",
+    "has_newsletter": true,
+    "signed_up": true
+  },
+  {
+    "name": "Artwords Bookshop",
+    "url": "https://artwords.co.uk/",
+    "address": "0-22 Broadway Market, London E8 4QJ",
+    "postcode": "E8 4QJ",
+    "venue_type": "bookstore",
+    "has_newsletter": true,
+    "signed_up": true
+  },
+  {
+    "name": "Burley Fisher Books",
+    "url": "https://burleyfisherbooks.com/",
+    "address": "400 Kingsland Rd, London E8 4AA",
+    "postcode": "E8 4AA",
+    "venue_type": "bookstore",
+    "has_newsletter": true,
+    "signed_up": true
+  },
+  {
+    "name": "Stoke Newington Bookshop",
+    "url": "http://www.stokenewingtonbookshop.co.uk/",
+    "address": "159 Stoke Newington High St, London N16 0NY",
+    "postcode": "N16 0NY",
+    "venue_type": "bokostore",
+    "has_newsletter": false
+  },
+  {
+    "name": "Pembury Community Centre",
+    "url": "https://www.hackney.gov.uk/pembury-community-centre",
+    "address": "1 Atkins Square, Dalston Ln, Lower Clapton, London E8 1FA",
+    "postcode": "E8 1FA",
+    "venue_type": "community centre",
+    "has_newsletter": false
+  },
+  {
+    "name": "Dalston CLR James Library",
+    "url": "https://hackney.gov.uk/dalston-library/",
+    "address": "Dalston Square, London E8 3BQ",
+    "postcode": "E8 3BQ",
+    "venue_type": "library",
+    "has_newsletter": true,
+    "signed_up": true
+  },
+  {
+    "name": "Dalston Roofpark",
+    "url": "https://dalstonroofpark.com/",
+    "address": "The Print House, 18-22 Ashwin St, London E8 3DL",
+    "postcode": "E8 3DL",
+    "venue_type": "bar",
+    "has_newsletter": false
+  },
+  {
+    "name": "Well Hung Gallery",
+    "url": "https://wellhung.co.uk/",
+    "address": "239 Hoxton St, London N1 5LG",
+    "postcode": "N1 5LG",
+    "venue_type": "gallery",
+    "has_newsletter": false
+  },
+  {
+    "name": "Nelly Duff",
+    "url": "https://www.nellyduff.com/",
+    "address": "156 Columbia Rd, London E2 7RG",
+    "postcode": "E2 7RG",
+    "venue_type": "art gallery",
+    "has_newsletter": true,
+    "signed_up": false
+  },
+  {
+    "name": "Pure Evil Gallery",
+    "url": "https://pureevilgallery.com/",
+    "address": "108 Leonard St, London EC2A 4XS",
+    "postcode": "EC2A 4XS",
+    "venue_type": "art gallery",
+    "has_newsletter": false,
+    "signed_up": false
+  },
+  {
+    "name": "Rich Mix",
+    "url": "https://richmix.org.uk/",
+    "address": "35-47 Bethnal Grn Rd, London E1 6LA",
+    "email": "richmix@r1.arts-mail.com",
+    "postcode": "E1 6LA",
+    "venue_type": "cinema",
+    "has_newsletter": true,
+    "signed_up": true
+  },
+  {
+    "name": "Shoreditch Town Hall",
+    "url": "https://shoreditchtownhall.com/",
+    "address": "380 Old St, London EC1V 9LT",
+    "postcode": "EC1V 9LT",
+    "venue_type": "town hall and events space",
+    "has_newsletter": true,
+    "signed_up": true
+  },
+  {
+    "name": "Kahaila",
+    "url": "https://www.kahaila.com/",
+    "address": "135 Brick Ln, London E1 6SB",
+    "postcode": "E1 6SB",
+    "venue_type": "cafe",
+    "has_newsletter": false
+  },
+  {
+    "name": "Lantana Shoreditch",
+    "url": "https://lantana.co.uk/shoreditch",
+    "address": "2, 55 Oliver's Yard, City Rd, London EC1Y 1HQ",
+    "postcode": "EC1Y 1HQ",
+    "venue_type": "restaurant",
+    "has_newsletter": true,
+    "signed_up": true
+  },
+  {
+    "name": "The Courtyard Theatre",
+    "url": "https://www.thecourtyard.org.uk/",
+    "address": "40 Bowling Green Walk, Pitfield St, London N1 6EU",
+    "postcode": "N1 6EU",
+    "venue_type": "concert hall",
+    "has_newsletter": false
+  },
+  {
+    "name": "Alba",
+    "url": "https://www.albacaffe.co.uk",
+    "address": "2 Canter Wy, London E1 8PS",
+    "postcode": "E1 8PS",
+    "venue_type": "cafe",
+    "has_newsletter": true,
+    "signed_up": true
+  },
+  {
+    "name": "The Divine",
+    "url": "https://thedivine.co.uk/",
+    "address": "33-35 Stoke Newington Rd, London N16 8BJ",
+    "email": "marketing@thedivine.co.uk",
+    "postcode": "N16 8BJ",
+    "venue_type": "lgbtq bar",
+    "has_newsletter": true,
+    "signed_up": true
+  },
+  {
+    "name": "Servant Jazz Quarters",
+    "url": "https://www.sjqdalston.com/",
+    "address": "SJQ, 10A Bradbury St, London N16 8JN",
+    "postcode": "N16 8JN",
+    "venue_type": "jazz bar",
+    "has_newsletter": false
+  },
+  {
+    "name": "The Crown and Shuttle",
+    "url": "https://www.crownandshuttle.com/",
+    "address": "226 Shoreditch High St, London E1 6PJ",
+    "postcode": "E1 6PJ",
+    "venue_type": "pub",
+    "has_newsletter": false
+  },
+  {
+    "name": "The Royal Drawing School",
+    "url": "https://www.royaldrawingschool.org/",
+    "address": "19-22 Charlotte Rd, London EC2A 3SG",
+    "email": "admin@royaldrawingschool.org",
+    "postcode": "EC2A 3SG",
+    "venue_type": "art school",
+    "has_newsletter": true,
+    "signed_up": true
+  },
+  {
+    "name": "Close-Up Cinema",
+    "url": "https://www.closeupfilmcentre.com/",
+    "address": "97 Sclater St, London E1 6HR",
+    "email": "info@closeupfilmcentre.com",
+    "postcode": "E1 6HR",
+    "venue_type": "cinema",
+    "has_newsletter": true,
+    "signed_up": true
+  },
+  {
+    "name": "Nomadic Community Garden",
+    "url": "https://nomadicgardens.weebly.com/",
+    "address": "Fleet Street Hill, London, E2 6EE",
+    "postcode": "E2 6EE",
+    "venue_type": "garden",
+    "has_newsletter": true,
+    "signed_up": true
+  },
+  {
+    "name": "Cable Street Community Garden",
+    "url": "https://londongardenstrust.org/mailing-list-subscribe/",
+    "email": "office@londongardenstrust.org",
+    "address": "Hardinge Street, E1 0EL",
+    "postcode": "E1 0EL",
+    "venue_type": "garden",
+    "has_newsletter": true,
+    "signed_up": true
+  },
+  {
+    "name": "Raven Row",
+    "url": "http://www.ravenrow.org/",
+    "address": "56 Artillery Lane, London E1 7LS",
+    "email": "info@ravenrow.org",
+    "postcode": "E1 7LS",
+    "venue_type": "art gallery",
+    "has_newsletter": true,
+    "signed_up": true
+  },
+  {
+    "name": "St Paul's Way Community Centre",
+    "url": "https://www.stpaulsway.com/community-centre",
+    "address": "83 St Paul's Way, Bow, E3 4AJ",
+    "postcode": "E3 4AJ",
+    "venue_type": "community centre",
+    "has_newsletter": false
+  },
+
+
+
+  {
+    "name": "White Post London",
+    "url": "https://www.instagram.com/whitepostlondon/?hl=en-gb",
+    "address":"92 White Post lane, London, United Kingdom E9 5EN",
+    "postcode": "E9 5EN",
+    "venue_type": "restaurant and bar",
+    "has_newsletter": false
+  },
+  {
+    "name": "The Palm Tree",
+    "url": "https://www.palmtreepublic.com/",
+    "address": "127 Grove Rd, Mile End, London, E3 5RP",
+    "postcode":  "E3 5RP",
+    "venue_type":  "pub",
+    "has_newsletter":  false
+  },
+  {
+    "name": "Roman Road London",
+    "url": "https://romanroadlondon.com/subscribe/",
+    "address": null,
+    "postcode":  null,
+    "venue_type":  "newsletter",
+    "is_generic":  true,
+    "has_newsletter":  true,
+    "signed_up":  true
   }
 ]
