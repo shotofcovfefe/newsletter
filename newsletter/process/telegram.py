@@ -350,12 +350,11 @@ def process_message(msg: dict):
 
     help_text = (
         "Welcome to Niche London Events! 👋\n\n"
-        "I curate a weekly newsletter about local and low-key London events. No, you won't find these on Time Out.\n"
+        "I curate a weekly newsletter about local and low-key London events. No, you won't find these on Time Out.\n\n"
         "Here are my commands:\n"
-        "/latest - Get the latest newsletter\n"
-        "/subscribe - Subscribe to receive newsletters\n"
-        "/unsubscribe - Unsubscribe from newsletters"
-
+        "/latest - Get the latest newsletter now\n"
+        "/subscribe - Receive once-weekly newsletters\n"
+        "/unsubscribe - I want out!\n\n"
         "Or send a valid UK postcode (e.g., E8 3PN) to get local events to you!"
     )
 
