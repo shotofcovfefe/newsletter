@@ -2,6 +2,7 @@ import os
 import time
 import logging
 import datetime
+import random
 import requests
 import typing as ta
 from supabase import create_client
@@ -228,14 +229,14 @@ def fetch_local_events(
     return final[:10]
 
 
-def fetch_random_events(days_ahead: int = 7) -> ta.List[ta.Dict[str, ta.Any]]:
+def fetch_random_events(days_ahead: int = 7, limit: int = 1) -> ta.List[ta.Dict[str, ta.Any]]:
     """
-    1) Pull all events in the next `days_ahead`
-    2) Shuffle them
-    3) Limit 2 per venue, total 10
+    Return up to `limit` random events in the next `days_ahead` days.
     """
     today_str = datetime.datetime.utcnow().strftime("%Y-%m-%d")
-    future_str = (datetime.datetime.utcnow() + datetime.timedelta(days=days_ahead)).strftime("%Y-%m-%d")
+    future_str = (
+        datetime.datetime.utcnow() + datetime.timedelta(days=days_ahead)
+    ).strftime("%Y-%m-%d")
 
     try:
         resp = (
@@ -250,21 +251,10 @@ def fetch_random_events(days_ahead: int = 7) -> ta.List[ta.Dict[str, ta.Any]]:
         logger.error(f"Error fetching random events: {exc}")
         return []
 
-    import random
     random.shuffle(data)
 
-    final = []
-    by_venue_count = {}
-    for r in data:
-        v_id = r.get("venue_id")
-        if by_venue_count.get(v_id, 0) < 2:
-            final.append(r)
-            by_venue_count[v_id] = by_venue_count.get(v_id, 0) + 1
-
-        if len(final) >= 10:
-            break
-
-    return final
+    # Return only the first `limit` events
+    return data[:limit]
 
 # ---------------------------------------------------------------------
 # Format messages
@@ -305,6 +295,26 @@ def process_message(msg: dict):
 
     if not chat_id:
         return
+
+    try:
+        # Check if a row exists
+        resp = supabase.table("telegram_chats").select("chat_id, message_count").eq("chat_id", chat_id).single().execute()
+        if resp.data:
+            current_count = resp.data["message_count"]
+            new_count = current_count + 1
+            supabase.table("telegram_chats") \
+                .update({"message_count": new_count}) \
+                .eq("chat_id", chat_id) \
+                .execute()
+        else:
+            # No row => insert
+            supabase.table("telegram_chats").insert({
+                "chat_id": chat_id,
+                "message_count": 1
+            }).execute()
+    except Exception as exc:
+        # If we fail for any reason, just log it and continue
+        logger.error(f"Error updating telegram_chats message_count for {chat_id}: {exc}")
 
     # Ensure user is in 'telegram_subscribers' (like your previous logic)
     try:
