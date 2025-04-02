@@ -23,10 +23,10 @@ supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 awaiting_location_update = {}  # dict: {chat_id: bool}
 
+# ---------------------------------------------------------------------
+# Telegram Helper
+# ---------------------------------------------------------------------
 
-# ---------------------------------------------------------------------
-# Telegram Helper: Polling & Sending Messages
-# ---------------------------------------------------------------------
 
 def get_telegram_updates(offset: ta.Optional[int] = None) -> ta.List[ta.Dict]:
     """
@@ -53,11 +53,9 @@ def get_telegram_updates(offset: ta.Optional[int] = None) -> ta.List[ta.Dict]:
         logger.error(f"Error getting updates: {exc}")
         return []
 
+
 def send_telegram_message(chat_id: str, text: str) -> bool:
-    """
-    Send a text message to a Telegram user/channel.
-    Splits into chunks if over 4000 chars, to avoid message length errors.
-    """
+    """Send a text message to a Telegram user/channel, splitting if over 4000 chars."""
     if not TELEGRAM_BOT_TOKEN:
         logger.error("Telegram bot token not configured.")
         return False
@@ -68,18 +66,12 @@ def send_telegram_message(chat_id: str, text: str) -> bool:
     success = True
 
     for part in parts:
-        payload = {
-            "chat_id": chat_id,
-            "text": part,
-            "parse_mode": "HTML"
-        }
+        payload = {"chat_id": chat_id, "text": part, "parse_mode": "HTML"}
         try:
             resp = requests.post(url, json=payload)
             if resp.status_code != 200:
                 logger.error(f"Failed to send message to {chat_id}: {resp.text}")
                 success = False
-            else:
-                logger.info(f"Sent message to chat {chat_id}")
         except Exception as exc:
             logger.error(f"Error sending message: {exc}")
             success = False
@@ -87,156 +79,69 @@ def send_telegram_message(chat_id: str, text: str) -> bool:
     return success
 
 # ---------------------------------------------------------------------
-# Broadcast events
+# Fetch Events
 # ---------------------------------------------------------------------
 
-def broadcast_newsletter():
-    """
-    For each subscriber in telegram_subscribers:
-      1) Check if they have a postcode in user_postcodes
-      2) If yes, fetch local events and send them
-      3) If not, either fetch random events or prompt them to update location
-    """
-    # 1) Grab all subscribers
-    try:
-        resp = supabase.table("telegram_subscribers").select("chat_id").execute()
-        subscribers = resp.data or []
-    except Exception as exc:
-        logger.error(f"Error fetching subscribers for Saturday broadcast: {exc}")
-        return
-
-    # 2) For each subscriber, fetch their postcode
-    for sub in subscribers:
-        chat_id = sub.get("chat_id")
-        if not chat_id:
-            continue
-
-        user_pc = get_user_postcode(chat_id)
-
-        if user_pc:
-            # Validate & geocode
-            if is_valid_uk_postcode(user_pc):
-                lat, lon = geocode_postcode_to_latlon(user_pc)
-                if lat is not None and lon is not None:
-                    # 3a) Fetch local events
-                    local_events = fetch_local_events(lat, lon, max_distance_km=15.0, days_ahead=7)
-                    msg_text = format_local_events_message(local_events, user_pc)
-                    send_telegram_message(chat_id, f"🎉 Saturday Update!\n\n{msg_text}")
-                    continue
-            # If postcode is invalid or geocode fails, we fall back to random
-            random_ev = fetch_random_events(days_ahead=7)
-            msg_text = format_random_events_message(random_ev)
-            send_telegram_message(chat_id,
-                "⚠️ We had trouble using your stored postcode. Here's some random events instead!\n\n" + msg_text
-            )
-        else:
-            # 3b) No postcode => random or a location prompt
-            random_ev = fetch_random_events(days_ahead=7)
-            msg_text = format_random_events_message(random_ev)
-            send_telegram_message(chat_id,
-                "📍 You haven't set a location yet! Use /updatelocation to get local events.\n\n" + msg_text
-            )
-
-# ---------------------------------------------------------------------
-# user_postcodes table
-# ---------------------------------------------------------------------
-
-def get_user_postcode(chat_id: str) -> ta.Optional[str]:
-    """Return the user's currently stored postcode, or None if none."""
-    try:
-        resp = (
-            supabase.table("user_postcodes")
-            .select("postcode")
-            .eq("chat_id", chat_id)
-            .single()
-            .execute()
-        )
-        if resp.data:
-            return resp.data["postcode"]
-    except:
-        pass
-    return None
-
-def set_user_postcode(chat_id: str, postcode: str) -> None:
-    """
-    Store or update the user_postcodes row for this user.
-    We'll do a simple approach: delete any old row, then insert a new one.
-    """
-    # Remove old record, if any
-    supabase.table("user_postcodes").delete().eq("chat_id", chat_id).execute()
-    # Insert new
-    supabase.table("user_postcodes").insert({
-        "chat_id": chat_id,
-        "postcode": postcode,
-        "created_date": datetime.datetime.utcnow().isoformat()
-    }).execute()
-
-# ---------------------------------------------------------------------
-# Fetch Local or Random Events from events_enriched
-# ---------------------------------------------------------------------
-
-def fetch_local_events(
-    user_lat: float,
-    user_lon: float,
+def fetch_events(
+    date_from: ta.Optional[str] = None,
+    date_to: ta.Optional[str] = None,
+    user_lat: ta.Optional[float] = None,
+    user_lon: ta.Optional[float] = None,
     max_distance_km: float = 15.0,
-    days_ahead: int = 7
+    limit_per_venue: int = 2,
+    overall_limit: int = 5
 ) -> ta.List[ta.Dict[str, ta.Any]]:
-    """
-    1) Query events_enriched for events in the next `days_ahead` days
-    2) Compute distance from user_lat/lon
-    3) Filter out events beyond `max_distance_km`
-    4) Limit to 2 events per venue
-    5) Return top 10 by ascending distance
-    """
-    today_str = datetime.datetime.utcnow().strftime("%Y-%m-%d")
-    future_str = (datetime.datetime.utcnow() + datetime.timedelta(days=days_ahead)).strftime("%Y-%m-%d")
+    """Fetch events from events_enriched, filtered by date and location if provided."""
+    query = supabase.table("events_enriched").select("*")
+
+    if date_from and date_to:
+        if date_from == date_to:
+            query = query.eq("event_date", date_from)
+        else:
+            query = query.gte("event_date", date_from).lt("event_date", date_to)
+    elif date_from:
+        query = query.gte("event_date", date_from)
+    elif date_to:
+        query = query.lt("event_date", date_to)
 
     try:
-        resp = (
-            supabase.table("events_enriched")
-            .select("*")
-            .gte("event_date", today_str)
-            .lt("event_date", future_str)
-            .execute()
-        )
+        resp = query.execute()
         data = resp.data or []
     except Exception as exc:
-        logger.error(f"Error fetching local events: {exc}")
+        logger.error(f"Error fetching events: {exc}")
         return []
 
-    # For each event, compute distance
-    for row in data:
-        ev_lat = row.get("latitude")
-        ev_lon = row.get("longitude")
-        if ev_lat is None or ev_lon is None:
-            row["distance_km"] = 9999999
-        else:
-            dist = haversine_distance(user_lat, user_lon, float(ev_lat), float(ev_lon))
-            row["distance_km"] = dist
+    if user_lat is not None and user_lon is not None:
+        for row in data:
+            ev_lat = row.get("latitude")
+            ev_lon = row.get("longitude")
+            if ev_lat is None or ev_lon is None:
+                row["distance_km"] = 9999999
+            else:
+                dist = haversine_distance(user_lat, user_lon, float(ev_lat), float(ev_lon))
+                row["distance_km"] = dist
+        data = [r for r in data if r["distance_km"] <= max_distance_km]
 
-    # Filter out beyond max_distance
-    filtered = [r for r in data if r["distance_km"] <= max_distance_km]
-
-    # Group by venue to limit 2 each
-    final = []
-    by_venue_count = {}
-    for r in sorted(filtered, key=lambda x: x["distance_km"]):
+    by_venue = {}
+    for r in data:
         v_id = r.get("venue_id")
-        if by_venue_count.get(v_id, 0) < 2:
-            final.append(r)
-            by_venue_count[v_id] = by_venue_count.get(v_id, 0) + 1
+        if v_id not in by_venue:
+            by_venue[v_id] = []
+        if len(by_venue[v_id]) < limit_per_venue:
+            by_venue[v_id].append(r)
 
-    return final[:10]
+    filtered = [event for venue_events in by_venue.values() for event in venue_events]
+    if user_lat is not None and user_lon is not None:
+        sorted_events = sorted(filtered, key=lambda x: x["distance_km"])
+    else:
+        sorted_events = sorted(filtered, key=lambda x: x["event_date"])
 
+    return sorted_events[:overall_limit]
 
 def fetch_random_events(days_ahead: int = 7, limit: int = 1) -> ta.List[ta.Dict[str, ta.Any]]:
-    """
-    Return up to `limit` random events in the next `days_ahead` days.
-    """
+    """Return up to `limit` random events in the next `days_ahead` days."""
     today_str = datetime.datetime.utcnow().strftime("%Y-%m-%d")
-    future_str = (
-        datetime.datetime.utcnow() + datetime.timedelta(days=days_ahead)
-    ).strftime("%Y-%m-%d")
+    future_str = (datetime.datetime.utcnow() + datetime.timedelta(days=days_ahead)).strftime("%Y-%m-%d")
 
     try:
         resp = (
@@ -252,41 +157,115 @@ def fetch_random_events(days_ahead: int = 7, limit: int = 1) -> ta.List[ta.Dict[
         return []
 
     random.shuffle(data)
-
-    # Return only the first `limit` events
     return data[:limit]
 
 # ---------------------------------------------------------------------
-# Format messages
+# Send Individual Event Messages
 # ---------------------------------------------------------------------
 
-def format_local_events_message(events: ta.List[ta.Dict[str, ta.Any]], postcode: str) -> str:
-    """
-    Return a textual summary of up to 10 local events, showing distance.
-    """
-    if not events:
-        return f"No local events found near {postcode} in the next 7 days."
-    lines = [f"Here are events near {postcode} in the next 7 days:\n"]
-    for ev in events:
-        desc = ev.get("description", "").strip()
-        dist_km = ev.get("distance_km", 0.0)
-        lines.append(f"{desc}\n📏 {dist_km:.1f} km away\n\n")
-    return "\n".join(lines)
+def send_event_messages(chat_id: str, events: ta.List[ta.Dict[str, ta.Any]]):
+    """Send each event as an individual message, including distance if available."""
+    for event in events:
+        desc = event.get("description", "").strip()
+        if "distance_km" in event:
+            dist_km = event["distance_km"]
+            message = f"{desc}\n📏 {dist_km:.1f} km away"
+        else:
+            message = desc
+        send_telegram_message(chat_id, message)
 
-def format_random_events_message(events: ta.List[ta.Dict[str, ta.Any]]) -> str:
+# ---------------------------------------------------------------------
+# User Postcodes
+# ---------------------------------------------------------------------
+
+def get_user_postcode(chat_id: str) -> ta.Optional[str]:
+    """Return the user's stored postcode, or None if none."""
+    try:
+        resp = (
+            supabase.table("user_postcodes")
+            .select("postcode")
+            .eq("chat_id", chat_id)
+            .single()
+            .execute()
+        )
+        return resp.data["postcode"] if resp.data else None
+    except:
+        return None
+
+def set_user_postcode(chat_id: str, postcode: str) -> None:
+    """Store or update the user's postcode."""
+    supabase.table("user_postcodes").delete().eq("chat_id", chat_id).execute()
+    supabase.table("user_postcodes").insert({
+        "chat_id": chat_id,
+        "postcode": postcode,
+        "created_date": datetime.datetime.utcnow().isoformat()
+    }).execute()
+
+# ---------------------------------------------------------------------
+# Broadcast Events
+# ---------------------------------------------------------------------
+
+def broadcast_newsletter(n_events: int = 5):
+    """Send weekly updates to subscribers with local or random events."""
+    try:
+        resp = supabase.table("telegram_subscribers").select("chat_id").execute()
+        subscribers = resp.data or []
+    except Exception as exc:
+        logger.error(f"Error fetching subscribers for Saturday broadcast: {exc}")
+        return
+
+    for sub in subscribers:
+        chat_id = sub.get("chat_id")
+        if not chat_id:
+            continue
+
+        user_pc = get_user_postcode(chat_id)
+
+        if user_pc and is_valid_uk_postcode(user_pc):
+            lat, lon = geocode_postcode_to_latlon(user_pc)
+            if lat is not None and lon is not None:
+                today_str = datetime.datetime.utcnow().strftime("%Y-%m-%d")
+                future_str = (datetime.datetime.utcnow() + datetime.timedelta(days=7)).strftime("%Y-%m-%d")
+                local_events = fetch_events(date_from=today_str, date_to=future_str, user_lat=lat, user_lon=lon)
+                msg_text = format_events_message(local_events, time_period="in the next 7 days", postcode=user_pc)
+                send_telegram_message(chat_id, f"🎉 Saturday Update!\n\n{msg_text}")
+                continue
+            # Restored nuanced messaging
+            random_ev = fetch_random_events(days_ahead=7, limit=n_events)
+            msg_text = format_events_message(random_ev, time_period="some random events")
+            send_telegram_message(chat_id, "⚠️ We had trouble using your stored postcode. Here's some random events:\n\n" + msg_text)
+        else:
+            random_ev = fetch_random_events(days_ahead=7, limit=n_events)
+            msg_text = format_events_message(random_ev, time_period="some random events")
+            send_telegram_message(chat_id, "📍 Set your location with /updatelocation for local events!\n\n" + msg_text)
+
+# ---------------------------------------------------------------------
+# Format Messages
+# ---------------------------------------------------------------------
+
+def format_events_message(events: ta.List[ta.Dict[str, ta.Any]], time_period: str = "", postcode: str = "") -> str:
     """
-    Return a textual summary of up to 10 random events (no distance).
+    Format a list of events into a message, including distance if available.
+    - time_period: e.g., "today", "tomorrow", "in the next 7 days"
+    - postcode: included in the header if provided
     """
     if not events:
-        return "No upcoming events found for the next 7 days."
-    lines = ["Here are some random events in the next 7 days:\n"]
+        location_str = f"near {postcode}" if postcode else ""
+        return f"No events found {time_period} {location_str}.".strip()
+    location_str = f"near {postcode}" if postcode else ""
+    header = f"Here are events {time_period} {location_str}:\n".strip()
+    lines = [header]
     for ev in events:
         desc = ev.get("description", "").strip()
-        lines.append(f"{desc}\n\n")
+        if "distance_km" in ev:
+            dist_km = ev["distance_km"]
+            lines.append(f"{desc}\n📏 {dist_km:.1f} km away\n\n")
+        else:
+            lines.append(f"{desc}\n\n")
     return "\n".join(lines)
 
 # ---------------------------------------------------------------------
-# Process incoming user messages
+# Process Incoming Messages
 # ---------------------------------------------------------------------
 
 def process_message(msg: dict):
@@ -296,42 +275,29 @@ def process_message(msg: dict):
     if not chat_id:
         return
 
+    # Update message count
     try:
-        # Check if a row exists
         resp = supabase.table("telegram_chats").select("chat_id, message_count").eq("chat_id", chat_id).single().execute()
         if resp.data:
-            current_count = resp.data["message_count"]
-            new_count = current_count + 1
-            supabase.table("telegram_chats") \
-                .update({"message_count": new_count}) \
-                .eq("chat_id", chat_id) \
-                .execute()
+            new_count = resp.data["message_count"] + 1
+            supabase.table("telegram_chats").update({"message_count": new_count}).eq("chat_id", chat_id).execute()
         else:
-            # No row => insert
-            supabase.table("telegram_chats").insert({
-                "chat_id": chat_id,
-                "message_count": 1
-            }).execute()
+            supabase.table("telegram_chats").insert({"chat_id": chat_id, "message_count": 1}).execute()
     except Exception as exc:
-        # If we fail for any reason, just log it and continue
-        logger.error(f"Error updating telegram_chats message_count for {chat_id}: {exc}")
+        logger.error(f"Error updating message_count: {exc}")
 
-    # Ensure user is in 'telegram_subscribers' (like your previous logic)
+    # Ensure user is subscribed
     try:
-        existing = supabase.table("telegram_subscribers").select("id").eq("chat_id", chat_id).execute()
-        if not existing.data:
+        if not supabase.table("telegram_subscribers").select("id").eq("chat_id", chat_id).execute().data:
             supabase.table("telegram_subscribers").insert({
                 "chat_id": chat_id,
                 "subscribed_date": datetime.datetime.utcnow().isoformat()
             }).execute()
-            logger.info(f"New subscriber added: {chat_id}")
     except Exception as exc:
         logger.error(f"Error adding subscriber: {exc}")
 
-    # Our new help text (no references to pre-prepared newsletters)
     help_text = (
         "Welcome to Niche London Events! 👋\n\n"
-        "I find local, low-key London events!\n\n"
         "Commands:\n"
         "local - Your closest events 🧭\n"
         "best - Our top picks  🏆\n"
@@ -339,9 +305,9 @@ def process_message(msg: dict):
         "tomorrow - What's on tomorrow? 👣\n"
         "random - I'm feeling lucky 🍀\n"
         "subscribe - Weekly roundup 📬\n"
-        "unsubscribe - Stop already! 🫗\n"  
+        "unsubscribe - Stop already! 🫗\n"
         "updatelocation - Update map pinhead 📍\n"
-        "Or just send me a valid UK postcode (e.g., E8 3PN) to get local events instantly!"
+        "Or send a valid UK postcode (e.g., E8 3PN) for local events!"
     )
 
     text_lower = text_raw.lower()
@@ -350,117 +316,127 @@ def process_message(msg: dict):
         awaiting_location_update[chat_id] = False
         send_telegram_message(chat_id, help_text)
 
-    elif text_lower == '/updatelocation':
-        # We set a flag indicating the next valid postcode is "officially" stored
+    elif text_lower in ["/updatelocation"]:
         awaiting_location_update[chat_id] = True
-        send_telegram_message(chat_id, "Please send me a valid UK postcode now (it will become your home location).")
+        send_telegram_message(chat_id, "Please send me a valid UK postcode now.")
 
-    elif text_lower == "/subscribe":
+    elif text_lower in ["/subscribe"]:
         awaiting_location_update[chat_id] = False
-        send_telegram_message(chat_id, "You're now subscribed. You'll receive weekly event updates (in the future).")
+        send_telegram_message(chat_id, "You're now subscribed to weekly updates.")
 
-    elif text_lower == "/unsubscribe":
+    elif text_lower in ["/unsubscribe"]:
         awaiting_location_update[chat_id] = False
         try:
             supabase.table("telegram_subscribers").delete().eq("chat_id", chat_id).execute()
-            send_telegram_message(chat_id, "You've been unsubscribed from weekly updates.")
+            send_telegram_message(chat_id, "You've been unsubscribed.")
         except Exception as exc:
             logger.error(f"Error unsubscribing: {exc}")
-            send_telegram_message(chat_id, "Error unsubscribing. Please try again later.")
+            send_telegram_message(chat_id, "Error unsubscribing. Try again later.")
 
-    elif text_lower == "/local":
+    elif text_lower in ["/local"]:
         awaiting_location_update[chat_id] = False
         user_pc = get_user_postcode(chat_id)
         if not user_pc:
-            send_telegram_message(chat_id, "📍 Please set your location first using /updatelocation.")
+            send_telegram_message(chat_id, "No location set. Use /updatelocation or send a postcode.")
             return
-
+        if not is_valid_uk_postcode(user_pc):
+            send_telegram_message(chat_id, f"Your postcode '{user_pc}' isn't valid. Try /updatelocation.")
+            return
         lat, lon = geocode_postcode_to_latlon(user_pc)
         if lat is None or lon is None:
-            send_telegram_message(chat_id, f"Couldn't find your location '{user_pc}'. Try /updatelocation again.")
+            send_telegram_message(chat_id, f"Could not geocode '{user_pc}'. Try /updatelocation.")
             return
-
-        local_events = fetch_local_events(lat, lon)
-        msg_text = format_local_events_message(local_events, user_pc)
-        send_telegram_message(chat_id, msg_text)
-
-    elif text_lower == "/best":
-        awaiting_location_update[chat_id] = False
-        events = fetch_random_events(days_ahead=7, limit=10)
-        msg_text = format_random_events_message(events)
-        send_telegram_message(chat_id, "🏆 Our top event picks this week:\n\n" + msg_text)
-
-    elif text_lower == "/today":
-        awaiting_location_update[chat_id] = False
         today_str = datetime.datetime.utcnow().strftime("%Y-%m-%d")
-        try:
-            resp = (
-                supabase.table("events_enriched")
-                .select("*")
-                .eq("event_date", today_str)
-                .execute()
-            )
-            events_today = resp.data or []
-        except Exception as exc:
-            logger.error(f"Error fetching today's events: {exc}")
-            events_today = []
+        future_str = (datetime.datetime.utcnow() + datetime.timedelta(days=7)).strftime("%Y-%m-%d")
+        events = fetch_events(date_from=today_str, date_to=future_str, user_lat=lat, user_lon=lon)
+        if events:
+            send_event_messages(chat_id, events)
+        else:
+            send_telegram_message(chat_id, "No local events found in the next 7 days.")
 
-        msg_text = format_random_events_message(events_today)
-        send_telegram_message(chat_id, f"🔜 Events happening today ({today_str}):\n\n" + msg_text)
-
-    elif text_lower == "/tomorrow":
+    elif text_lower in ["/best"]:
         awaiting_location_update[chat_id] = False
-        tomorrow_str = (datetime.datetime.utcnow() + datetime.timedelta(days=1)).strftime("%Y-%m-%d")
-        try:
-            resp = (
-                supabase.table("events_enriched")
-                .select("*")
-                .eq("event_date", tomorrow_str)
-                .execute()
-            )
-            events_tomorrow = resp.data or []
-        except Exception as exc:
-            logger.error(f"Error fetching tomorrow's events: {exc}")
-            events_tomorrow = []
+        events = fetch_random_events(days_ahead=7, limit=5)
+        if events:
+            send_event_messages(chat_id, events)
+        else:
+            send_telegram_message(chat_id, "No events found.")
 
-        msg_text = format_random_events_message(events_tomorrow)
-        send_telegram_message(chat_id, f"👣 Events happening tomorrow ({tomorrow_str}):\n\n" + msg_text)
-
-    elif text_lower == "/random":
+    elif text_lower in ["/today"]:
         awaiting_location_update[chat_id] = False
-        # Fetch random events (ignore location)
+        user_pc = get_user_postcode(chat_id)
+        if not user_pc:
+            send_telegram_message(chat_id, "No location set. Use /updatelocation for today’s events.")
+            return
+        if not is_valid_uk_postcode(user_pc):
+            send_telegram_message(chat_id, f"Your postcode '{user_pc}' isn't valid. Try /updatelocation.")
+            return
+        lat, lon = geocode_postcode_to_latlon(user_pc)
+        if lat is None or lon is None:
+            send_telegram_message(chat_id, f"Could not geocode '{user_pc}'. Try /updatelocation.")
+            return
+        today_str = datetime.datetime.utcnow().strftime("%Y-%m-%d")
+        events = fetch_events(date_from=today_str, date_to=today_str, user_lat=lat, user_lon=lon)
+        if events:
+            send_event_messages(chat_id, events)
+        else:
+            send_telegram_message(chat_id, "No events found today.")
+
+    elif text_lower in ["/tomorrow"]:
+        awaiting_location_update[chat_id] = False
+        user_pc = get_user_postcode(chat_id)
+        if not user_pc:
+            send_telegram_message(chat_id, "No location set. Use /updatelocation for tomorrow’s events.")
+            return
+        if not is_valid_uk_postcode(user_pc):
+            send_telegram_message(chat_id, f"Your postcode '{user_pc}' isn't valid. Try /updatelocation.")
+            return
+        lat, lon = geocode_postcode_to_latlon(user_pc)
+        if lat is None or lon is None:
+            send_telegram_message(chat_id, f"Could not geocode '{user_pc}'. Try /updatelocation.")
+            return
+        tomorrow = (datetime.datetime.utcnow() + datetime.timedelta(days=1)).strftime("%Y-%m-%d")
+        events = fetch_events(date_from=tomorrow, date_to=tomorrow, user_lat=lat, user_lon=lon)
+        if events:
+            send_event_messages(chat_id, events)
+        else:
+            send_telegram_message(chat_id, "No events found tomorrow.")
+
+    elif text_lower in ["/random"]:
+        awaiting_location_update[chat_id] = False
         events = fetch_random_events(days_ahead=7, limit=1)
-        msg_text = format_random_events_message(events)
-        send_telegram_message(chat_id, msg_text)
+        if events:
+            send_event_messages(chat_id, events)
+        else:
+            send_telegram_message(chat_id, "No events found.")
 
     elif is_valid_uk_postcode(text_raw.upper()):
-        # The user sent a valid postcode
         if awaiting_location_update.get(chat_id, False):
-            # This user *did* type /updatelocation previously, so store it
             set_user_postcode(chat_id, text_raw.upper())
-            # Reset the flag
             awaiting_location_update[chat_id] = False
-            send_telegram_message(chat_id, f"Your location was updated to {text_raw.upper()}!")
+            send_telegram_message(chat_id, f"Your location is now {text_raw.upper()}!")
         else:
-            # They didn't do /updatelocation => treat it as an ad-hoc request
             lat, lon = geocode_postcode_to_latlon(text_raw.upper())
             if not lat or not lon:
-                send_telegram_message(chat_id, "Couldn't geocode that postcode. Please try again.")
+                send_telegram_message(chat_id, "Couldn’t geocode that postcode. Try again.")
                 return
-
-            local_events = fetch_local_events(lat, lon)
-            msg_text = format_local_events_message(local_events, text_raw.upper())
-            send_telegram_message(chat_id, msg_text)
+            today_str = datetime.datetime.utcnow().strftime("%Y-%m-%d")
+            future_str = (datetime.datetime.utcnow() + datetime.timedelta(days=7)).strftime("%Y-%m-%d")
+            events = fetch_events(date_from=today_str, date_to=future_str, user_lat=lat, user_lon=lon)
+            if events:
+                send_event_messages(chat_id, events)
+            else:
+                send_telegram_message(chat_id, "No local events found in the next 7 days.")
 
     else:
         send_telegram_message(chat_id, "Unrecognized command or invalid postcode. Try /help.")
 
 # ---------------------------------------------------------------------
-# Main Bot Loop
+# Main Loop
 # ---------------------------------------------------------------------
 
 def main():
-    logger.info("Bot started. Polling for commands and user messages...")
+    logger.info("Bot started. Polling for messages...")
     offset = None
 
     while True:
@@ -469,21 +445,17 @@ def main():
             update_id = upd.get('update_id')
             if update_id is not None:
                 offset = update_id + 1
-
             message = upd.get('message')
             if message:
                 process_message(message)
 
         now_utc = datetime.datetime.utcnow()
         if now_utc.weekday() == 5 and now_utc.hour == 9:
-            logger.info("Detected Saturday 9 AM UTC -> broadcasting dynamic events to subscribers.")
+            logger.info("Saturday 9 AM UTC: Broadcasting events.")
             broadcast_newsletter()
-
-            # Sleep an hour so we don't spam repeated broadcasts during the same hour
             time.sleep(3600)
 
         time.sleep(3)
-
 
 if __name__ == "__main__":
     main()
