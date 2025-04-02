@@ -333,17 +333,20 @@ def process_message(msg: dict):
         "Welcome to Niche London Events! 👋\n\n"
         "I find local, low-key London events!\n\n"
         "Commands:\n"
-        "/latest - Show events near your stored postcode 🏆\n"
-        "/random - Show random events this week 🎡\n"
-        "/subscribe - Weekly broadcast 📬\n"
-        "/unsubscribe - Stop broadcast 🫗\n"
-        "/updatelocation - Set or update your location 📍\n\n"
+        "local - Your closest events 🧭\n"
+        "best - Our top picks  🏆\n"
+        "today - What's on today? 🔜\n"
+        "tomorrow - What's on tomorrow? 👣\n"
+        "random - I'm feeling lucky 🍀\n"
+        "subscribe - Weekly roundup 📬\n"
+        "unsubscribe - Stop already! 🫗\n"  
+        "updatelocation - Update map pinhead 📍\n"
         "Or just send me a valid UK postcode (e.g., E8 3PN) to get local events instantly!"
     )
 
     text_lower = text_raw.lower()
 
-    if text_lower in ["/start", "/help", "hello", "hi", "?"]:
+    if text_lower in ["/start", "/help", "help", "hello", "hi", "?"]:
         awaiting_location_update[chat_id] = False
         send_telegram_message(chat_id, help_text)
 
@@ -365,35 +368,63 @@ def process_message(msg: dict):
             logger.error(f"Error unsubscribing: {exc}")
             send_telegram_message(chat_id, "Error unsubscribing. Please try again later.")
 
-    elif text_lower == "/latest":
+    elif text_lower == "/local":
         awaiting_location_update[chat_id] = False
-        # Attempt to fetch the user's stored postcode
         user_pc = get_user_postcode(chat_id)
         if not user_pc:
-            send_telegram_message(chat_id, "No location set. Please use /updatelocation or send me a postcode.")
-            return
-
-        # Validate & geocode
-        if not is_valid_uk_postcode(user_pc):
-            send_telegram_message(chat_id, f"Your stored postcode '{user_pc}' isn't valid. Try /updatelocation again.")
+            send_telegram_message(chat_id, "📍 Please set your location first using /updatelocation.")
             return
 
         lat, lon = geocode_postcode_to_latlon(user_pc)
         if lat is None or lon is None:
-            send_telegram_message(chat_id, f"Could not geocode your stored postcode '{user_pc}'. Try /updatelocation.")
+            send_telegram_message(chat_id, f"Couldn't find your location '{user_pc}'. Try /updatelocation again.")
             return
 
-        # Fetch local events
-        local_events = fetch_local_events(lat, lon, max_distance_km=15.0, days_ahead=7)
+        local_events = fetch_local_events(lat, lon)
         msg_text = format_local_events_message(local_events, user_pc)
         send_telegram_message(chat_id, msg_text)
 
-    elif text_lower == "/random":
+    elif text_lower == "/best":
         awaiting_location_update[chat_id] = False
-        # Fetch random events (ignore location)
-        events = fetch_random_events(days_ahead=7)
+        events = fetch_random_events(days_ahead=7, limit=10)
         msg_text = format_random_events_message(events)
-        send_telegram_message(chat_id, msg_text)
+        send_telegram_message(chat_id, "🏆 Our top event picks this week:\n\n" + msg_text)
+
+    elif text_lower == "/today":
+        awaiting_location_update[chat_id] = False
+        today_str = datetime.datetime.utcnow().strftime("%Y-%m-%d")
+        try:
+            resp = (
+                supabase.table("events_enriched")
+                .select("*")
+                .eq("event_date", today_str)
+                .execute()
+            )
+            events_today = resp.data or []
+        except Exception as exc:
+            logger.error(f"Error fetching today's events: {exc}")
+            events_today = []
+
+        msg_text = format_random_events_message(events_today)
+        send_telegram_message(chat_id, f"🔜 Events happening today ({today_str}):\n\n" + msg_text)
+
+    elif text_lower == "/tomorrow":
+        awaiting_location_update[chat_id] = False
+        tomorrow_str = (datetime.datetime.utcnow() + datetime.timedelta(days=1)).strftime("%Y-%m-%d")
+        try:
+            resp = (
+                supabase.table("events_enriched")
+                .select("*")
+                .eq("event_date", tomorrow_str)
+                .execute()
+            )
+            events_tomorrow = resp.data or []
+        except Exception as exc:
+            logger.error(f"Error fetching tomorrow's events: {exc}")
+            events_tomorrow = []
+
+        msg_text = format_random_events_message(events_tomorrow)
+        send_telegram_message(chat_id, f"👣 Events happening tomorrow ({tomorrow_str}):\n\n" + msg_text)
 
     elif is_valid_uk_postcode(text_raw.upper()):
         # The user sent a valid postcode
@@ -449,51 +480,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-"""
-help_text = (
-        "Welcome to Niche London Events! 👋\n\n"
-        "I curate a weekly newsletter about local and low-key London events. No, you won't find these on Time Out.\n\n"
-        "Here are my commands:\n"
-        "latest - List best events 🏆\n"
-        "random - List random events  🎡\n"
-        "subscribe - Weekly events roundup 📬\n"
-        "unsubscribe - No unprompted messages 🫗\n"  
-        "updatelocation - Update location pinhead 📍\n"
-        "Or send a valid UK postcode (e.g., E8 3PN) to get local events to wherever you are, now!"
-    )
-
-def main():
-    logger.info("Bot started. Always running, polling for commands...")
-    offset = None  # track the last update_id
-
-    while True:
-        # 1) Poll for new updates
-        updates = get_telegram_updates(offset)
-        for upd in updates:
-            update_id = upd.get('update_id')
-            if update_id is not None:
-                offset = update_id + 1
-
-            message = upd.get('message')
-            if message:
-                process_message(message)
-
-        # 2) Check if it's Saturday at 9 AM UTC => broadcast
-        now_utc = datetime.datetime.utcnow()
-        # weekday(): Monday=0 ... Sunday=6, so Saturday=5
-        if now_utc.weekday() == 5 and now_utc.hour == 9:
-            # Attempt broadcast. If the newsletter is already broadcast, no duplicate is sent.
-            logger.info("Detected Saturday 9 AM UTC. Attempting auto-broadcast...")
-            broadcast_production_newsletter()
-
-            # Sleep for a while so we don't keep re-checking every loop within 9:00 hour
-            # (The DB also prevents duplicates, but let's avoid spamming logs or repeated checks)
-            time.sleep(3600)  # 1 hour
-
-        time.sleep(3)  # short delay to prevent busy looping
-
-
-if __name__ == "__main__":
-    main()
-    """
