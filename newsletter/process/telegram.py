@@ -426,6 +426,13 @@ def process_message(msg: dict):
         msg_text = format_random_events_message(events_tomorrow)
         send_telegram_message(chat_id, f"👣 Events happening tomorrow ({tomorrow_str}):\n\n" + msg_text)
 
+    elif text_lower == "/random":
+        awaiting_location_update[chat_id] = False
+        # Fetch random events (ignore location)
+        events = fetch_random_events(days_ahead=7, limit=1)
+        msg_text = format_random_events_message(events)
+        send_telegram_message(chat_id, msg_text)
+
     elif is_valid_uk_postcode(text_raw.upper()):
         # The user sent a valid postcode
         if awaiting_location_update.get(chat_id, False):
