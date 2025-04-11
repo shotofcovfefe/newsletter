@@ -166,13 +166,7 @@ def fetch_random_events(days_ahead: int = 7, limit: int = 1) -> ta.List[ta.Dict[
 def send_event_messages(chat_id: str, events: ta.List[ta.Dict[str, ta.Any]]):
     """Send each event as an individual message with HTML formatting, including distance if available."""
     for event in events:
-        desc = event.get("description", "").strip()
-        if "distance_km" in event:
-            dist_km = event["distance_km"]
-            # Append distance with HTML formatting
-            message = f"{desc}\n📏 <i>{dist_km:.1f} km away</i>"
-        else:
-            message = desc
+        message = format_events_message(events=[event])
         send_telegram_message(chat_id, message)
         time.sleep(0.2)
 
