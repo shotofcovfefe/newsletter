@@ -1,6 +1,7 @@
+import json
 import os
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from openai import OpenAI
 from supabase import create_client, Client
 from dotenv import load_dotenv
@@ -55,23 +56,26 @@ def format_date(date_str: str) -> str:
         return date_str
 
 
-def generate_event_description(event: dict, venue_name: str, latitude: str | None, longitude: str | None) -> str | None:
+def generate_pretty_fields(event: dict, venue_name: str) -> dict | None:
     """
-    Generates a formatted event summary using GPT, similar to newsletter.py's generate_newsletter_text.
-    We pass in the venue name + lat/long (in case we need them later).
+    Generates structured, prettified fields for an event using GPT:
+    - pretty_event_name (e.g. "🎸 Jazz Night")
+    - pretty_venue_name (e.g. "at The Blues Kitchen")
+    - pretty_date (e.g. "Saturday, March 14th")
+    - pretty_description (short summary)
     """
     title = event.get("title", "Untitled Event")
     date = format_date(event.get("event_start_date", "No Date"))
     description = event.get("description", "")
 
     system_prompt = (
-        "You are an AI assistant that writes a structured description for an event. "
-        "Format the event in the following structure:\n\n"
-        "[ONE RELEVANT EMOJI] [TITLE]\n"
-        "📍 [VENUE NAME] - [START DATE]\n"
-        "[DESCRIPTION - ONE OR TWO SENTENCES MAX]\n\n"
-        "Keep the description concise, representative, and engaging. Truthfulness is essential. "
-        "Do not use first-person language. Output only plain text."
+        "You are an AI assistant that formats event data for presentation. "
+        "Return a JSON object with these fields:\n"
+        "- pretty_event_name: One representative emoji + concise, engaging title (e.g. '🎨 Life Drawing')\n"
+        "- pretty_venue_name: the venue name (e.g. 'The Royal Swan Pub')\n"
+        "- pretty_date: Human-readable date (e.g. 'Saturday, March 14th')\n"
+        "- pretty_description: One or two short, factual, engaging sentences. No first-person. Never mention the venue name.\n\n"
+        "Output ONLY the JSON. Do not add extra text or formatting tags like <b> or <i>."
     )
 
     user_prompt = (
@@ -79,7 +83,7 @@ def generate_event_description(event: dict, venue_name: str, latitude: str | Non
         f"Event Date: {date}\n"
         f"Venue Name: {venue_name}\n"
         f"Event Description: {description}\n\n"
-        "Please generate the formatted description."
+        "Please generate the formatted fields."
     )
 
     try:
@@ -89,10 +93,12 @@ def generate_event_description(event: dict, venue_name: str, latitude: str | Non
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
+            response_format={"type": "json_object"}
         )
-        return completion.choices[0].message.content.strip()
+        raw_json = completion.choices[0].message.content.strip()
+        return raw_json.lstrip('```json\n').strip('\n').rstrip('```')
     except Exception as exc:
-        logger.error(f"Error generating description for event {event['id']}: {exc}")
+        logger.error(f"Error generating fields for event {event['id']}: {exc}")
         return None
 
 
@@ -105,6 +111,9 @@ def process_events():
     processed_ids_success = [row["event_id"] for row in processed_response_success.data] if processed_response_success.data else []
     processed_ids = list(set(processed_ids_all + processed_ids_success))
 
+    today = datetime.now(timezone.utc).date()
+    start_of_today = datetime.combine(today, datetime.min.time()).replace(tzinfo=timezone.utc)
+
     # Fetch events to process
     events_response = (
         supabase.table("events")
@@ -113,6 +122,8 @@ def process_events():
         .or_("is_event_recurring.is.null,is_event_recurring.eq.false")
         .or_("is_event_course.is.null,is_event_course.eq.false")
         .not_.in_("id", processed_ids)
+        .not_.is_("event_start_date", None)
+        .gte("event_start_date", start_of_today.isoformat())
         .execute()
     )
     events = events_response.data or []
@@ -166,7 +177,6 @@ def process_events():
                 sender_name = email.get("sender_name") or None
                 if sender_name:
                     sender_name_lower = (sender_name or "").strip().lower()
-                    print(sender_name_lower)
 
                     venue_response = (
                         supabase
@@ -195,11 +205,20 @@ def process_events():
             continue
 
         # 4) Generate event summary text
-        description_text = generate_event_description(event, venue_name, lat, lon)
-        if not description_text:
+        pretty_fields_json = generate_pretty_fields(event, venue_name)
+        if not pretty_fields_json:
             reason = f"Failure: GPT generation failed for event {event_id}"
             supabase.table("events_enriched_processed").insert({"id": event_id, "reason": reason}).execute()
             logger.info(reason)
+            continue
+
+        # 5) Extract JSON
+        try:
+            pretty_fields = json.loads(pretty_fields_json)
+        except Exception as exc:
+            reason = f"Failure: GPT output could not be parsed as JSON for event {event_id}. Error: {exc}"
+            supabase.table("events_enriched_processed").insert({"id": event_id, "reason": reason}).execute()
+            logger.error(reason)
             continue
 
         # 5) Insert into events_enriched
@@ -207,10 +226,14 @@ def process_events():
             supabase.table("events_enriched").insert({
                 "event_id": event_id,
                 "venue_id": matched_venue["id"] if matched_venue else None,
-                "description": description_text,
+                "description": None,
                 "latitude": lat,
                 "longitude": lon,
                 "event_date": event["event_start_date"],
+                "pretty_event_name": pretty_fields.get("pretty_event_name"),
+                "pretty_venue_name": pretty_fields.get("pretty_venue_name"),
+                "pretty_date": pretty_fields.get("pretty_date"),
+                "pretty_description": pretty_fields.get("pretty_description"),
                 "created_at": datetime.utcnow().isoformat()
             }).execute()
 

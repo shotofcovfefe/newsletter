@@ -88,7 +88,7 @@ def fetch_events(
     user_lat: ta.Optional[float] = None,
     user_lon: ta.Optional[float] = None,
     max_distance_km: float = 15.0,
-    limit_per_venue: int = 2,
+    limit_per_venue: int = 1,
     overall_limit: int = 5
 ) -> ta.List[ta.Dict[str, ta.Any]]:
     """Fetch events from events_enriched, filtered by date and location if provided."""
@@ -164,15 +164,17 @@ def fetch_random_events(days_ahead: int = 7, limit: int = 1) -> ta.List[ta.Dict[
 # ---------------------------------------------------------------------
 
 def send_event_messages(chat_id: str, events: ta.List[ta.Dict[str, ta.Any]]):
-    """Send each event as an individual message, including distance if available."""
+    """Send each event as an individual message with HTML formatting, including distance if available."""
     for event in events:
         desc = event.get("description", "").strip()
         if "distance_km" in event:
             dist_km = event["distance_km"]
-            message = f"{desc}\n📏 {dist_km:.1f} km away"
+            # Append distance with HTML formatting
+            message = f"{desc}\n📏 <i>{dist_km:.1f} km away</i>"
         else:
             message = desc
         send_telegram_message(chat_id, message)
+        time.sleep(0.2)
 
 # ---------------------------------------------------------------------
 # User Postcodes
@@ -245,24 +247,34 @@ def broadcast_newsletter(n_events: int = 5):
 
 def format_events_message(events: ta.List[ta.Dict[str, ta.Any]], time_period: str = "", postcode: str = "") -> str:
     """
-    Format a list of events into a message, including distance if available.
+    Format a list of events using rich HTML formatting and the structured fields from events_enriched.
     - time_period: e.g., "today", "tomorrow", "in the next 7 days"
     - postcode: included in the header if provided
     """
     if not events:
         location_str = f"near {postcode}" if postcode else ""
         return f"No events found {time_period} {location_str}.".strip()
+
     location_str = f"near {postcode}" if postcode else ""
     header = f"Here are events {time_period} {location_str}:\n".strip()
     lines = [header]
+
     for ev in events:
-        desc = ev.get("description", "").strip()
+        name = ev.get("pretty_event_name", "").strip()
+        venue = ev.get("pretty_venue_name", "").strip()
+        date = ev.get("pretty_date", "").strip()
+        summary = ev.get("pretty_description", "").strip()
+
+        line = f"<b>{name}</b>\n📍 <i>{venue}</i> - <u>{date}</u>\n{summary}"
+
         if "distance_km" in ev:
             dist_km = ev["distance_km"]
-            lines.append(f"{desc}\n📏 {dist_km:.1f} km away\n\n")
-        else:
-            lines.append(f"{desc}\n\n")
-    return "\n".join(lines)
+            line += f"\n📏 <i>{dist_km:.1f} km away</i>"
+
+        lines.append(line + "\n")
+
+    return "\n\n".join(lines)
+
 
 # ---------------------------------------------------------------------
 # Process Incoming Messages

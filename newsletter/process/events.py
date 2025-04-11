@@ -7,8 +7,7 @@ from openai import OpenAI
 from dotenv import load_dotenv
 
 from newsletter.database import fetch_all_emails, save_events_to_db, email_already_parsed
-from newsletter.process.emails import is_events_newsletter
-from newsletter.types import Events, Event
+from newsletter.types import Event
 
 load_dotenv()
 
