@@ -66,7 +66,12 @@ def send_telegram_message(chat_id: str, text: str) -> bool:
     success = True
 
     for part in parts:
-        payload = {"chat_id": chat_id, "text": part, "parse_mode": "HTML"}
+        payload = {
+            "chat_id": chat_id,
+            "text": part,
+            "parse_mode": "HTML",
+            "disable_web_page_preview": True
+        }
         try:
             resp = requests.post(url, json=payload)
             if resp.status_code != 200:
@@ -267,11 +272,11 @@ def format_events_message(events: ta.List[ta.Dict[str, ta.Any]], time_period: st
             lines.append(header)
 
     for ev in events:
-        name = ev.get("pretty_event_name", "").strip()
-        venue = ev.get("pretty_venue_name", "").strip()
-        date = ev.get("pretty_date", "").strip()
+        name = (ev.get("pretty_event_name") or "").strip()
+        venue = (ev.get("pretty_venue_name") or "").strip()
+        date = (ev.get("pretty_date") or "").strip()
         url = (ev.get("venue_url") or "").strip()
-        summary = ev.get("pretty_description", "").strip()
+        summary = (ev.get("pretty_description") or "").strip()
 
         if url:
             venue_html = f'<a href="{url}">{venue}</a>'
