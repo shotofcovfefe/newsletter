@@ -270,7 +270,7 @@ def format_events_message(events: ta.List[ta.Dict[str, ta.Any]], time_period: st
         name = ev.get("pretty_event_name", "").strip()
         venue = ev.get("pretty_venue_name", "").strip()
         date = ev.get("pretty_date", "").strip()
-        url = ev.get("venue_url", "").strip()
+        url = (ev.get("venue_url") or "").strip()
         summary = ev.get("pretty_description", "").strip()
 
         if url:
