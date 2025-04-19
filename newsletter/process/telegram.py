@@ -283,15 +283,15 @@ def format_events_message(events: ta.List[ta.Dict[str, ta.Any]], time_period: st
         else:
             venue_html = venue
 
-        line = f"<b>{name}</b>\n📍 <i>{venue_html}</i>\n📅 {date}\n👉 {summary}"
+        line = f"<b>{name}</b>\n📍 <i>{venue_html}</i>\n👉 {summary}\n📅 {date}"
 
         if "distance_km" in ev and postcode:
             dist_km = ev["distance_km"]
             if dist_km < 1:
                 dist_m = round_sig(dist_km * 1000)
-                line += f"\n📏🧭 <i>{dist_m:.0f}m away from {postcode.upper()}</i>"
+                line += f"\n🧭 <i>{dist_m:.0f}m from {postcode.upper()}</i>"
             else:
-                line += f"\n📏 <i>{dist_km:.1f} km away from {postcode.upper()}</i>"
+                line += f"\n🧭 <i>{dist_km:.1f} km from {postcode.upper()}</i>"
         lines.append(line + "\n")
 
     return "\n\n".join(lines)
