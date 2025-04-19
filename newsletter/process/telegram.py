@@ -8,7 +8,7 @@ import typing as ta
 from supabase import create_client
 from dotenv import load_dotenv
 
-from newsletter.utils import is_valid_london_postcode, geocode_postcode_to_latlon, haversine_distance
+from newsletter.utils import is_valid_london_postcode, geocode_postcode_to_latlon, haversine_distance, round_sig
 
 load_dotenv()
 
@@ -274,12 +274,13 @@ def format_events_message(events: ta.List[ta.Dict[str, ta.Any]], time_period: st
 
         line = f"<b>{name}</b>\n📍 <i>{venue}</i> - <u>{date}</u>\n{summary}"
 
-        print(f'-> {"distance_km" in ev}, {postcode}')
         if "distance_km" in ev and postcode:
             dist_km = ev["distance_km"]
-            line += f"\n📏 <i>{dist_km:.1f} km away from {postcode.upper()}</i>"
-            print("yayyy")
-        print(line)
+            if dist_km < 1:
+                dist_m = round_sig(dist_km * 1000)
+                line += f"\n📏 <i>{dist_m:.0f} km away from {postcode.upper()}</i>"
+            else:
+                line += f"\n📏 <i>{dist_km:.1f} km away from {postcode.upper()}</i>"
         lines.append(line + "\n")
 
     return "\n\n".join(lines)

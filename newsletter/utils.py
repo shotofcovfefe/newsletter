@@ -15,6 +15,12 @@ def _load_postcode_data():
     return df
 
 
+def round_sig(x, sig=1):
+    if x == 0:
+        return 0
+    return round(x, -int(math.floor(math.log10(abs(x)))) + (sig - 1))
+
+
 def get_postcode_info(postcode: str):
     if isinstance(postcode, str):
         df = _load_postcode_data()
