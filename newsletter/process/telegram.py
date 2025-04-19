@@ -110,13 +110,11 @@ def fetch_events(
     except Exception as exc:
         logger.error(f"Error fetching events: {exc}")
         return []
-    print(f"user lat / lon not None: {user_lat is not None and user_lon is not None}")
     if user_lat is not None and user_lon is not None:
         print(user_lat, user_lon)
         for row in data:
             ev_lat = row.get("latitude")
             ev_lon = row.get("longitude")
-            print(f"user lat / lon not None: {ev_lat is not None and ev_lon is not None}")
             if ev_lat is None or ev_lon is None:
                 row["distance_km"] = 9999999
             else:
@@ -128,7 +126,6 @@ def fetch_events(
                 )
                 row["distance_km"] = dist
         data = [r for r in data if r["distance_km"] <= max_distance_km]
-        print("data: ", data)
 
     by_venue = {}
     for r in data:
@@ -229,9 +226,10 @@ def broadcast_newsletter(n_events: int = 5):
             lat, lon = geocode_postcode_to_latlon(user_pc)
             if lat is not None and lon is not None:
                 today_str = datetime.datetime.utcnow().strftime("%Y-%m-%d")
-                future_str = (datetime.datetime.utcnow() + datetime.timedelta(days=7)).strftime("%Y-%m-%d")
+                n_days = 7
+                future_str = (datetime.datetime.utcnow() + datetime.timedelta(days=n_days)).strftime("%Y-%m-%d")
                 local_events = fetch_events(date_from=today_str, date_to=future_str, user_lat=lat, user_lon=lon)
-                msg_text = format_events_message(local_events, time_period="in the next 7 days", postcode=user_pc)
+                msg_text = format_events_message(local_events, time_period=f"in the next {n_days} days", postcode=user_pc)
                 send_telegram_message(chat_id, f"🎉 Saturday Update!\n\n{msg_text}")
                 continue
             # Restored nuanced messaging
@@ -272,10 +270,12 @@ def format_events_message(events: ta.List[ta.Dict[str, ta.Any]], time_period: st
 
         line = f"<b>{name}</b>\n📍 <i>{venue}</i> - <u>{date}</u>\n{summary}"
 
+        print(f'-> {"distance_km" in ev}, {postcode}')
         if "distance_km" in ev and postcode:
             dist_km = ev["distance_km"]
             line += f"\n📏 <i>{dist_km:.1f} km away from {postcode.upper()}</i>"
-
+            print("yayyy")
+        print(line)
         lines.append(line + "\n")
 
     return "\n\n".join(lines)
