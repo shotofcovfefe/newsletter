@@ -5,3 +5,6 @@ token.json
 __pycache__/
 .idea/
 .DS_Store
+*.ipynb
+.ipynb_checkpoints/
+venues.json

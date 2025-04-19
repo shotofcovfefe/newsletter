@@ -8,7 +8,7 @@ import typing as ta
 from supabase import create_client
 from dotenv import load_dotenv
 
-from newsletter.utils import is_valid_uk_postcode, geocode_postcode_to_latlon, haversine_distance
+from newsletter.utils import is_valid_london_postcode, geocode_postcode_to_latlon, haversine_distance
 
 load_dotenv()
 
@@ -217,7 +217,7 @@ def broadcast_newsletter(n_events: int = 5):
 
         user_pc = get_user_postcode(chat_id)
 
-        if user_pc and is_valid_uk_postcode(user_pc):
+        if user_pc and is_valid_london_postcode(user_pc):
             lat, lon = geocode_postcode_to_latlon(user_pc)
             if lat is not None and lon is not None:
                 today_str = datetime.datetime.utcnow().strftime("%Y-%m-%d")
@@ -264,9 +264,9 @@ def format_events_message(events: ta.List[ta.Dict[str, ta.Any]], time_period: st
 
         line = f"<b>{name}</b>\n📍 <i>{venue}</i> - <u>{date}</u>\n{summary}"
 
-        if "distance_km" in ev:
+        if "distance_km" in ev and postcode:
             dist_km = ev["distance_km"]
-            line += f"\n📏 <i>{dist_km:.1f} km away</i>"
+            line += f"\n📏 <i>{dist_km:.1f} km away from {postcode.upper()}</i>"
 
         lines.append(line + "\n")
 
@@ -348,8 +348,8 @@ def process_message(msg: dict):
         if not user_pc:
             send_telegram_message(chat_id, "No location set. Use /updatelocation or send a postcode.")
             return
-        if not is_valid_uk_postcode(user_pc):
-            send_telegram_message(chat_id, f"Your postcode '{user_pc}' isn't valid. Try /updatelocation.")
+        if not is_valid_london_postcode(user_pc):
+            send_telegram_message(chat_id, f"Postcode must be valid and in London. Try /updatelocation.")
             return
         lat, lon = geocode_postcode_to_latlon(user_pc)
         if lat is None or lon is None:
@@ -377,8 +377,8 @@ def process_message(msg: dict):
         if not user_pc:
             send_telegram_message(chat_id, "No location set. Use /updatelocation for today’s events.")
             return
-        if not is_valid_uk_postcode(user_pc):
-            send_telegram_message(chat_id, f"Your postcode '{user_pc}' isn't valid. Try /updatelocation.")
+        if not is_valid_london_postcode(user_pc):
+            send_telegram_message(chat_id, f"Postcode must be valid and in London. Try /updatelocation.")
             return
         lat, lon = geocode_postcode_to_latlon(user_pc)
         if lat is None or lon is None:
@@ -397,8 +397,8 @@ def process_message(msg: dict):
         if not user_pc:
             send_telegram_message(chat_id, "No location set. Use /updatelocation for tomorrow’s events.")
             return
-        if not is_valid_uk_postcode(user_pc):
-            send_telegram_message(chat_id, f"Your postcode '{user_pc}' isn't valid. Try /updatelocation.")
+        if not is_valid_london_postcode(user_pc):
+            send_telegram_message(chat_id, f"Postcode must be valid and in London. Try /updatelocation.")
             return
         lat, lon = geocode_postcode_to_latlon(user_pc)
         if lat is None or lon is None:
@@ -419,7 +419,7 @@ def process_message(msg: dict):
         else:
             send_telegram_message(chat_id, "No events found.")
 
-    elif is_valid_uk_postcode(text_raw.upper()):
+    elif is_valid_london_postcode(text_raw.upper()):
         if awaiting_location_update.get(chat_id, False):
             set_user_postcode(chat_id, text_raw.upper())
             awaiting_location_update[chat_id] = False

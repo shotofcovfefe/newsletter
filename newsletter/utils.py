@@ -1,11 +1,32 @@
 import hashlib
 import math
 import typing as ta
+import os
+import pandas as pd
+from functools import lru_cache
 
-import pgeocode
+
+@lru_cache
+def _load_postcode_data():
+    data_path = os.path.join(os.path.dirname(__file__), "../data/london_postcodes.csv")
+    df = pd.read_csv(data_path, dtype=str)
+    df["postcode_clean"] = df["postcode"].str.replace(" ", "").str.upper()
+    df.set_index("postcode_clean", inplace=True)
+    return df
 
 
-nomi = pgeocode.Nominatim("GB")
+def get_postcode_info(postcode: str):
+    if isinstance(postcode, str):
+        df = _load_postcode_data()
+        clean = postcode.replace(" ", "").upper()
+        if clean in df.index:
+            row = df.loc[clean]
+            return {
+                "lat": row["lat"],
+                "lon": row["lon"],
+                "borough": row["borough"],
+            }
+    return {}
 
 
 def hash_prefix(input_str: str, length: int = 8) -> str:
@@ -17,19 +38,19 @@ def hash_prefix(input_str: str, length: int = 8) -> str:
     return full_hash[:length]
 
 
-def is_valid_uk_postcode(postcode: str) -> bool:
+def is_valid_london_postcode(postcode: str) -> bool:
     """
     Quick check if the postcode is valid enough for pgeocode to handle.
     We'll rely on pgeocode returning a result with a valid lat/lon.
     Alternatively, you can do a more thorough regex check if you want.
     """
-    if not postcode:
+    if not isinstance(postcode, str):
         return False
 
     # Simple approach: get lat/lon from pgeocode
-    location = nomi.query_postal_code(postcode)
-    # If location.latitude is NaN (float) or None, it's not valid
-    if location is None or math.isnan(location.latitude) or math.isnan(location.longitude):
+    pc_dct = get_postcode_info(postcode)
+    
+    if pc_dct.get('lat') is None or pc_dct.get('lon') is None or math.isnan(pc_dct.get('lat')) or math.isnan(pc_dct.get('lon')):
         return False
     return True
 
@@ -39,10 +60,14 @@ def geocode_postcode_to_latlon(postcode: str) -> ta.Tuple[float, float]:
     Returns (latitude, longitude) for the given postcode.
     Assumes postcode is valid. If anything fails, returns (None, None).
     """
-    location = nomi.query_postal_code(postcode)
-    if location is None:
-        return None, None
-    return float(location.latitude), float(location.longitude)
+    if not isinstance(postcode, str):
+        return False
+
+    # Simple approach: get lat/lon from pgeocode
+    pc_dct = get_postcode_info(postcode)
+
+    if pc_dct.get('lat') is None or pc_dct.get('lon') is None or math.isnan(pc_dct.get('lat')) or math.isnan(pc_dct.get('lon')):
+        return float(pc_dct.get('lat')), float(pc_dct.get('lon'))
 
 
 def haversine_distance(lat1, lon1, lat2, lon2):
