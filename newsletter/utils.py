@@ -51,11 +51,15 @@ def is_valid_london_postcode(postcode: str) -> bool:
     pc_dct = get_postcode_info(postcode)
 
     if pc_dct.get('lat') is None or pc_dct.get('lon') is None:
+        return None
+
+    try:
         lat = float(pc_dct.get('lat'))
         lon = float(pc_dct.get('lon'))
-        if math.isnan(lat) or math.isnan(lon):
-            return False
-        return False
+        if not math.isnan(lat) or not math.isnan(lon):
+            return True
+    except Exception:
+        pass
     return True
 
 
