@@ -2,6 +2,7 @@ import os
 import time
 import logging
 import datetime
+import json
 import random
 import requests
 import typing as ta
@@ -54,7 +55,7 @@ def get_telegram_updates(offset: ta.Optional[int] = None) -> ta.List[ta.Dict]:
         return []
 
 
-def send_telegram_message(chat_id: str, text: str) -> bool:
+def send_telegram_message(chat_id: str, text: str, reply_markup: ta.Optional[ta.Dict] = None) -> bool:
     """Send a text message to a Telegram user/channel, splitting if over 4000 chars."""
     if not TELEGRAM_BOT_TOKEN:
         logger.error("Telegram bot token not configured.")
@@ -65,23 +66,78 @@ def send_telegram_message(chat_id: str, text: str) -> bool:
     parts = [text[i:i + max_length] for i in range(0, len(text), max_length)]
     success = True
 
-    for part in parts:
+    for i, part in enumerate(parts):
         payload = {
             "chat_id": chat_id,
             "text": part,
             "parse_mode": "HTML",
             "disable_web_page_preview": True
         }
+        # Only add reply_markup to the last part if splitting, or the only part if not splitting
+        if reply_markup and i == len(parts) - 1:
+             payload["reply_markup"] = json.dumps(reply_markup) # Use json.dumps here
+
         try:
             resp = requests.post(url, json=payload)
             if resp.status_code != 200:
-                logger.error(f"Failed to send message to {chat_id}: {resp.text}")
+                logger.error(f"Failed to send message part to {chat_id}: {resp.text}")
                 success = False
         except Exception as exc:
-            logger.error(f"Error sending message: {exc}")
+            logger.error(f"Error sending message part: {exc}")
             success = False
+        # Small delay between parts if splitting
+        if len(parts) > 1 and i < len(parts) - 1:
+            time.sleep(0.1)
 
     return success
+
+
+def edit_telegram_message(chat_id: str, message_id: int, text: str, reply_markup: ta.Optional[ta.Dict] = None) -> bool:
+    """Edit an existing message text and optionally its inline keyboard."""
+    if not TELEGRAM_BOT_TOKEN:
+        logger.error("Telegram bot token not configured.")
+        return False
+
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/editMessageText"
+    payload = {
+        "chat_id": chat_id,
+        "message_id": message_id,
+        "text": text,
+        "parse_mode": "HTML",
+        "disable_web_page_preview": True
+    }
+    if reply_markup:
+        # Inline keyboard markup needs to be a JSON string for editing
+        payload["reply_markup"] = json.dumps(reply_markup)
+
+    try:
+        resp = requests.post(url, json=payload)
+        if resp.status_code != 200:
+             # Gracefully handle the "message is not modified" error
+            if "message is not modified" in resp.text:
+                logger.info(f"Message {message_id} in chat {chat_id} was not modified (content likely the same).")
+                return True # Treat as success, no change needed
+            logger.error(f"Failed to edit message {message_id} in chat {chat_id}: {resp.text}")
+            return False
+        return True
+    except Exception as exc:
+        logger.error(f"Error editing message: {exc}")
+        return False
+
+
+def answer_callback_query(callback_query_id: str) -> bool:
+    """Sends an empty acknowledgement for a callback query."""
+    if not TELEGRAM_BOT_TOKEN:
+        return False
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/answerCallbackQuery"
+    payload = {"callback_query_id": callback_query_id}
+    try:
+        resp = requests.post(url, json=payload)
+        return resp.status_code == 200
+    except Exception as exc:
+        logger.error(f"Error answering callback query: {exc}")
+        return False
+
 
 # ---------------------------------------------------------------------
 # Fetch Events
@@ -248,6 +304,59 @@ def broadcast_newsletter(n_events: int = 5):
             random_ev = fetch_random_events(days_ahead=7, limit=n_events)
             msg_text = format_events_message(random_ev, time_period="some random events")
             send_telegram_message(chat_id, "📍 Set your location with /updatelocation for local events!\n\n" + msg_text)
+
+
+def process_callback_query(callback_query: dict):
+    """Handles incoming callback queries from inline keyboard buttons."""
+    query_id = callback_query.get('id')
+    from_user = callback_query.get('from', {}) # User who clicked
+    message = callback_query.get('message') # Original message the button was attached to
+    data = callback_query.get('data') # The callback_data string we defined
+
+    if not query_id or not message or not data:
+        logger.warning("Received incomplete callback query.")
+        if query_id: answer_callback_query(query_id) # Still try to answer
+        return
+
+    chat_id = str(message.get('chat', {}).get('id', ''))
+    message_id = message.get('message_id')
+
+    # Always acknowledge the query first!
+    answer_callback_query(query_id)
+
+    if not chat_id or not message_id:
+        logger.error(f"Could not get chat_id or message_id from callback query {query_id}")
+        return
+
+    # --- Handle specific callback data ---
+    if data == "load_random":
+        logger.info(f"Processing 'load_random' callback from chat {chat_id}, msg {message_id}")
+        # Fetch a *new* random event
+        new_events = fetch_random_events(days_ahead=7, limit=1)
+        if new_events:
+             # Re-define the keyboard (to keep it on the message after editing)
+            keyboard = {
+                "inline_keyboard": [
+                    [{"text": "Load another random event 🎲", "callback_data": "load_random"}]
+                ]
+            }
+            # Format the new event's text
+            new_message_text = format_events_message(events=[new_events[0]], time_period="a random event")
+            # Edit the original message
+            success = edit_telegram_message(chat_id, message_id, new_message_text, reply_markup=keyboard)
+            if not success:
+                 logger.error(f"Failed to edit message for 'load_random' callback. Chat: {chat_id}, Msg: {message_id}")
+                 # Optional: Send a temporary error message if editing fails
+                 # send_telegram_message(chat_id, "Sorry, couldn't update the event just now.")
+        else:
+            # No more events found, edit the message to inform the user
+            edit_telegram_message(chat_id, message_id, "Sorry, couldn't find another random event right now.")
+
+    # Add elif data == "other_button": blocks here for future buttons
+
+    else:
+        logger.warning(f"Received unhandled callback data: {data} from chat {chat_id}")
+
 
 # ---------------------------------------------------------------------
 # Format Messages
@@ -454,9 +563,16 @@ def process_message(msg: dict):
         awaiting_location_update[chat_id] = False
         events = fetch_random_events(days_ahead=7, limit=1)
         if events:
-            send_event_messages(chat_id, events)
+            keyboard = {
+                "inline_keyboard": [
+                    [{"text": "Another one! 🎰", "callback_data": "load_random"}]
+                ]
+            }
+            message_text = format_events_message(events=[events[0]], time_period="a random event")
+            send_telegram_message(chat_id, message_text, reply_markup=keyboard)
         else:
-            send_telegram_message(chat_id, "No events found.")
+            send_telegram_message(chat_id, "No random events found.")
+
 
     elif is_valid_london_postcode(text_raw.upper()):
         if awaiting_location_update.get(chat_id, False):
@@ -493,17 +609,49 @@ def main():
             update_id = upd.get('update_id')
             if update_id is not None:
                 offset = update_id + 1
+
+            # --- Check for callback query FIRST ---
+            callback_query = upd.get('callback_query')
+            if callback_query:
+                try:
+                    process_callback_query(callback_query)
+                except Exception as e:
+                     logger.error(f"Error processing callback query: {e}", exc_info=True)
+                     # Ensure we still answer the query even if processing fails
+                     query_id = callback_query.get('id')
+                     if query_id: answer_callback_query(query_id)
+                continue # Skip message processing if it was a callback
+
+            # --- Process regular message ---
             message = upd.get('message')
             if message:
-                process_message(message)
+                try:
+                    process_message(message)
+                except Exception as e:
+                    logger.error(f"Error processing message: {e}", exc_info=True)
+                    # Optional: Notify user of error?
+                    # chat_id = message.get('chat', {}).get('id')
+                    # if chat_id:
+                    #    send_telegram_message(str(chat_id), "Sorry, something went wrong processing your request.")
 
+        # --- Saturday Broadcast ---
         now_utc = datetime.datetime.utcnow()
-        if now_utc.weekday() == 5 and now_utc.hour == 9:
-            logger.info("Saturday 9 AM UTC: Broadcasting events.")
-            broadcast_newsletter()
-            time.sleep(3600)
+        # Check if it's Saturday (5) and 9 AM UTC and if we haven't already run it this hour
+        # (Simple check to prevent multiple runs if loop is fast)
+        current_hour_key = f"{now_utc.date()}-{now_utc.hour}"
+        if not hasattr(main, 'last_broadcast_hour') or main.last_broadcast_hour != current_hour_key:
+            if now_utc.weekday() == 5 and now_utc.hour == 9:
+                 logger.info("Saturday 9 AM UTC: Broadcasting events.")
+                 try:
+                     broadcast_newsletter()
+                     main.last_broadcast_hour = current_hour_key # Mark as run for this hour
+                 except Exception as e:
+                     logger.error(f"Error during broadcast: {e}", exc_info=True)
+                 # Sleep longer after broadcast attempt to avoid immediate re-check if it failed
+                 time.sleep(60) # Sleep for a minute after check/run
 
-        time.sleep(3)
+        time.sleep(1) # Reduced sleep time for better responsiveness, adjust as needed
+
 
 if __name__ == "__main__":
     main()
