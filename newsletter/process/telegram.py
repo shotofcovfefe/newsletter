@@ -111,7 +111,6 @@ def fetch_events(
         logger.error(f"Error fetching events: {exc}")
         return []
     if user_lat is not None and user_lon is not None:
-        print(user_lat, user_lon)
         for row in data:
             ev_lat = row.get("latitude")
             ev_lon = row.get("longitude")
@@ -260,7 +259,8 @@ def format_events_message(events: ta.List[ta.Dict[str, ta.Any]], time_period: st
         return f"No events found {time_period} {location_str}.".strip()
 
     location_str = f"near {postcode}" if postcode else ""
-    header = f"Here are events {time_period} {location_str}:\n".strip()
+    if len(events) > 1:
+        header = f"Here are events {time_period} {location_str}:\n".strip()
 
     lines = []
     if location_str != "" or time_period != "" :
@@ -270,15 +270,21 @@ def format_events_message(events: ta.List[ta.Dict[str, ta.Any]], time_period: st
         name = ev.get("pretty_event_name", "").strip()
         venue = ev.get("pretty_venue_name", "").strip()
         date = ev.get("pretty_date", "").strip()
+        url = ev.get("venue_url", "").strip()
         summary = ev.get("pretty_description", "").strip()
 
-        line = f"<b>{name}</b>\n📍 <i>{venue}</i> - <u>{date}</u>\n{summary}"
+        if url:
+            venue_html = f'<a href="{url}">{venue}</a>'
+        else:
+            venue_html = venue
+
+        line = f"<b>{name}</b>\n📍 <i>{venue_html}</i>\n📅 {date}\n👉 {summary}"
 
         if "distance_km" in ev and postcode:
             dist_km = ev["distance_km"]
             if dist_km < 1:
                 dist_m = round_sig(dist_km * 1000)
-                line += f"\n📏 <i>{dist_m:.0f} km away from {postcode.upper()}</i>"
+                line += f"\n📏🧭 <i>{dist_m:.0f}m away from {postcode.upper()}</i>"
             else:
                 line += f"\n📏 <i>{dist_km:.1f} km away from {postcode.upper()}</i>"
         lines.append(line + "\n")

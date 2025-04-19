@@ -181,7 +181,7 @@ def process_events():
                     venue_response = (
                         supabase
                         .table("venues")
-                        .select("id", "name, latitude, longitude")
+                        .select("id", "name, latitude, longitude", "url")
                         .ilike("name", sender_name_lower)  # case-insensitive match
                         .execute()
                     )
@@ -189,12 +189,15 @@ def process_events():
                     if venue_response.data:
                         matched_venue = venue_response.data[0]
                         venue_name = matched_venue["name"]
+                        venue_url = matched_venue["url"]
                         lat, lon = matched_venue["latitude"], matched_venue["longitude"]
                     else:
                         venue_name = None
+                        venue_url = None
                         lat, lon = None, None
                 else:
                     venue_name = None
+                    venue_url = None
                     lat, lon = None, None
 
         # If no venue name from any method => fail
@@ -234,6 +237,7 @@ def process_events():
                 "pretty_venue_name": pretty_fields.get("pretty_venue_name"),
                 "pretty_date": pretty_fields.get("pretty_date"),
                 "pretty_description": pretty_fields.get("pretty_description"),
+                "venue_url": venue_url,
                 "created_at": datetime.utcnow().isoformat()
             }).execute()
 
