@@ -110,17 +110,25 @@ def fetch_events(
     except Exception as exc:
         logger.error(f"Error fetching events: {exc}")
         return []
-
+    print(f"user lat / lon not None: {user_lat is not None and user_lon is not None}")
     if user_lat is not None and user_lon is not None:
+        print(user_lat, user_lon)
         for row in data:
             ev_lat = row.get("latitude")
             ev_lon = row.get("longitude")
+            print(f"user lat / lon not None: {ev_lat is not None and ev_lon is not None}")
             if ev_lat is None or ev_lon is None:
                 row["distance_km"] = 9999999
             else:
-                dist = haversine_distance(user_lat, user_lon, float(ev_lat), float(ev_lon))
+                dist = haversine_distance(
+                    lat1=user_lat,
+                    lon1=user_lon,
+                    lat2=float(ev_lat),
+                    lon2=float(ev_lon)
+                )
                 row["distance_km"] = dist
         data = [r for r in data if r["distance_km"] <= max_distance_km]
+        print("data: ", data)
 
     by_venue = {}
     for r in data:
