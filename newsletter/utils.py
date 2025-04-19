@@ -49,8 +49,12 @@ def is_valid_london_postcode(postcode: str) -> bool:
 
     # Simple approach: get lat/lon from pgeocode
     pc_dct = get_postcode_info(postcode)
-    
-    if pc_dct.get('lat') is None or pc_dct.get('lon') is None or math.isnan(pc_dct.get('lat')) or math.isnan(pc_dct.get('lon')):
+
+    if pc_dct.get('lat') is None or pc_dct.get('lon') is None:
+        lat = float(pc_dct.get('lat'))
+        lon = float(pc_dct.get('lon'))
+        if math.isnan(lat) or math.isnan(lon):
+            return False
         return False
     return True
 
@@ -61,13 +65,15 @@ def geocode_postcode_to_latlon(postcode: str) -> ta.Tuple[float, float]:
     Assumes postcode is valid. If anything fails, returns (None, None).
     """
     if not isinstance(postcode, str):
-        return False
+        return None, None
 
     # Simple approach: get lat/lon from pgeocode
     pc_dct = get_postcode_info(postcode)
 
-    if pc_dct.get('lat') is None or pc_dct.get('lon') is None or math.isnan(pc_dct.get('lat')) or math.isnan(pc_dct.get('lon')):
+    try:
         return float(pc_dct.get('lat')), float(pc_dct.get('lon'))
+    except Exception:
+        return None, None
 
 
 def haversine_distance(lat1, lon1, lat2, lon2):
