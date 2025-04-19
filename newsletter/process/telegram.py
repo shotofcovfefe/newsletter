@@ -168,10 +168,14 @@ def fetch_random_events(days_ahead: int = 7, limit: int = 1) -> ta.List[ta.Dict[
 # Send Individual Event Messages
 # ---------------------------------------------------------------------
 
-def send_event_messages(chat_id: str, events: ta.List[ta.Dict[str, ta.Any]]):
+def send_event_messages(
+    chat_id: str,
+    events: ta.List[ta.Dict[str, ta.Any]],
+    postcode: str = "",
+):
     """Send each event as an individual message with HTML formatting, including distance if available."""
     for event in events:
-        message = format_events_message(events=[event])
+        message = format_events_message(events=[event], postcode=postcode)
         send_telegram_message(chat_id, message)
         time.sleep(0.2)
 
@@ -356,7 +360,7 @@ def process_message(msg: dict):
         if not user_pc:
             send_telegram_message(chat_id, "No location set. Use /updatelocation or send a postcode.")
             return
-        if not is_valid_london_postcode(user_pc):
+        if not is_valid_london_postcode(postcode=user_pc):
             send_telegram_message(chat_id, f"Postcode must be valid and in London. Try /updatelocation.")
             return
         lat, lon = geocode_postcode_to_latlon(user_pc)
@@ -367,7 +371,11 @@ def process_message(msg: dict):
         future_str = (datetime.datetime.utcnow() + datetime.timedelta(days=7)).strftime("%Y-%m-%d")
         events = fetch_events(date_from=today_str, date_to=future_str, user_lat=lat, user_lon=lon)
         if events:
-            send_event_messages(chat_id, events)
+            send_event_messages(
+                chat_id=chat_id,
+                events=events,
+                postcode=user_pc,
+            )
         else:
             send_telegram_message(chat_id, "No local events found in the next 7 days.")
 
@@ -375,7 +383,10 @@ def process_message(msg: dict):
         awaiting_location_update[chat_id] = False
         events = fetch_random_events(days_ahead=7, limit=5)
         if events:
-            send_event_messages(chat_id, events)
+            send_event_messages(
+                chat_id=chat_id,
+                events=events
+            )
         else:
             send_telegram_message(chat_id, "No events found.")
 
@@ -395,7 +406,11 @@ def process_message(msg: dict):
         today_str = datetime.datetime.utcnow().strftime("%Y-%m-%d")
         events = fetch_events(date_from=today_str, date_to=today_str, user_lat=lat, user_lon=lon)
         if events:
-            send_event_messages(chat_id, events)
+            send_event_messages(
+                chat_id=chat_id,
+                events=events,
+                postcode=user_pc,
+            )
         else:
             send_telegram_message(chat_id, "No events found today.")
 
@@ -415,7 +430,11 @@ def process_message(msg: dict):
         tomorrow = (datetime.datetime.utcnow() + datetime.timedelta(days=1)).strftime("%Y-%m-%d")
         events = fetch_events(date_from=tomorrow, date_to=tomorrow, user_lat=lat, user_lon=lon)
         if events:
-            send_event_messages(chat_id, events)
+            send_event_messages(
+                chat_id=chat_id,
+                events=events,
+                postcode=user_pc,
+            )
         else:
             send_telegram_message(chat_id, "No events found tomorrow.")
 
