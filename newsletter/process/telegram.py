@@ -258,13 +258,13 @@ def format_events_message(events: ta.List[ta.Dict[str, ta.Any]], time_period: st
         location_str = f"near {postcode}" if postcode else ""
         return f"No events found {time_period} {location_str}.".strip()
 
+    lines = []
     location_str = f"near {postcode}" if postcode else ""
     if len(events) > 1:
         header = f"Here are events {time_period} {location_str}:\n".strip()
 
-    lines = []
-    if location_str != "" or time_period != "" :
-        lines.append(header)
+        if location_str != "" or time_period != "" :
+            lines.append(header)
 
     for ev in events:
         name = ev.get("pretty_event_name", "").strip()
