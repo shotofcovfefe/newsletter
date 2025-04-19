@@ -8,7 +8,7 @@ from functools import lru_cache
 
 @lru_cache
 def _load_postcode_data():
-    data_path = os.path.join(os.path.dirname(__file__), "../data/london_postcodes.csv")
+    data_path = os.path.join(os.path.dirname(__file__), "data/london_postcodes.csv")
     df = pd.read_csv(data_path, dtype=str)
     df["postcode_clean"] = df["postcode"].str.replace(" ", "").str.upper()
     df.set_index("postcode_clean", inplace=True)
@@ -48,7 +48,9 @@ def is_valid_london_postcode(postcode: str) -> bool:
         return False
 
     # Simple approach: get lat/lon from pgeocode
+    print(f"- postcode: {postcode}")
     pc_dct = get_postcode_info(postcode)
+    print(f"- pc_dct: {pc_dct}")
 
     if pc_dct.get('lat') is None or pc_dct.get('lon') is None:
         return None
