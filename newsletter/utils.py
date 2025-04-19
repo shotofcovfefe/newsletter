@@ -48,9 +48,7 @@ def is_valid_london_postcode(postcode: str) -> bool:
         return False
 
     # Simple approach: get lat/lon from pgeocode
-    print(f"- postcode: {postcode}")
     pc_dct = get_postcode_info(postcode)
-    print(f"- pc_dct: {pc_dct}")
 
     if pc_dct.get('lat') is None or pc_dct.get('lon') is None:
         return None
