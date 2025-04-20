@@ -99,3 +99,56 @@ def haversine_distance(lat1, lon1, lat2, lon2):
          + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(d_lon / 2)**2)
     c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
     return R * c
+
+
+def calculate_bearing(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """
+    Calculates the initial bearing between two points (in degrees).
+    Bearing is measured clockwise from North (0°).
+    """
+    # Convert degrees to radians
+    lat1_rad = math.radians(lat1)
+    lon1_rad = math.radians(lon1)
+    lat2_rad = math.radians(lat2)
+    lon2_rad = math.radians(lon2)
+
+    # Difference in longitude
+    dlon_rad = lon2_rad - lon1_rad
+
+    # Calculate components for atan2
+    y = math.sin(dlon_rad) * math.cos(lat2_rad)
+    x = math.cos(lat1_rad) * math.sin(lat2_rad) - \
+        math.sin(lat1_rad) * math.cos(lat2_rad) * math.cos(dlon_rad)
+
+    # Calculate bearing in radians
+    initial_bearing_rad = math.atan2(y, x)
+
+    # Convert bearing from radians to degrees
+    initial_bearing_deg = math.degrees(initial_bearing_rad)
+
+    # Normalize bearing to 0-360 range
+    compass_bearing = (initial_bearing_deg + 360) % 360
+
+    return compass_bearing
+
+
+def bearing_to_arrow(angle_degrees: float) -> str:
+    """
+    Converts a bearing angle (0-360 degrees) to an ASCII arrow.
+    """
+    if angle_degrees is None:
+        return ""  # Return empty if angle is invalid
+
+    # Define the arrows (N, NE, E, SE, S, SW, W, NW)
+    arrows = ["↑", "↗", "→", "↘", "↓", "↙", "←", "↖"]
+
+    # Each segment is 360 / 8 = 45 degrees wide.
+    # We shift by half a segment (22.5 degrees) to center the segments on the directions.
+    segment_index = int(((angle_degrees + 22.5) % 360) / 45.0)
+
+    try:
+        return arrows[segment_index]
+    except IndexError:
+        # This should ideally not happen if angle_degrees is within 0-360
+        logger.warning(f"Could not map bearing {angle_degrees} to arrow index {segment_index}.")
+        return "·"  # Fallback character
