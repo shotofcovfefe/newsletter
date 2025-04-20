@@ -62,6 +62,7 @@ def generate_pretty_fields(event: dict, venue_name: str) -> dict | None:
     - pretty_event_name (e.g. "🎸 Jazz Night")
     - pretty_venue_name (e.g. "at The Blues Kitchen")
     - pretty_date (e.g. "Saturday, March 14th")
+    - vibes (e.g. "Chill, soulful, uplifting")
     - pretty_description (short summary)
     """
     title = event.get("title", "Untitled Event")
@@ -74,7 +75,9 @@ def generate_pretty_fields(event: dict, venue_name: str) -> dict | None:
         "- pretty_event_name: One representative emoji + concise, engaging title (e.g. '🎨 Life Drawing')\n"
         "- pretty_venue_name: the venue name (e.g. 'The Royal Swan Pub')\n"
         "- pretty_date: Human-readable date (e.g. 'Saturday, March 14th')\n"
+        "- vibes: 3 words (comma separated, first letter of first word capitalised) that best represent the event (e.g. 'Powerful, moving, gripping' or 'Chill, soulful, uplifting')\n"
         "- pretty_description: One or two short, factual, engaging sentences. No first-person. Never mention the venue name.\n\n"
+        
         "Output ONLY the JSON. Do not add extra text or formatting tags like <b> or <i>."
     )
 
@@ -155,7 +158,7 @@ def process_events():
         venue_response = (
             supabase
             .table("venues")
-            .select("id, name, latitude, longitude")
+            .select("id, name, latitude, longitude, url")
             .eq("email_address", email["email_address"])
             .execute()
         )
@@ -167,7 +170,7 @@ def process_events():
             lat, lon = matched_venue["latitude"], matched_venue["longitude"]
         else:
             # (b) match on domain
-            venue_response = supabase.table("venues").select("id", "name, latitude, longitude").eq("domain", domain).execute()
+            venue_response = supabase.table("venues").select("id", "name, latitude, longitude, url").eq("domain", domain).execute()
             if venue_response.data:
                 matched_venue = venue_response.data[0]
                 venue_name = matched_venue["name"]
@@ -189,15 +192,12 @@ def process_events():
                     if venue_response.data:
                         matched_venue = venue_response.data[0]
                         venue_name = matched_venue["name"]
-                        venue_url = matched_venue["url"]
                         lat, lon = matched_venue["latitude"], matched_venue["longitude"]
                     else:
                         venue_name = None
-                        venue_url = None
                         lat, lon = None, None
                 else:
                     venue_name = None
-                    venue_url = None
                     lat, lon = None, None
 
         # If no venue name from any method => fail
@@ -237,7 +237,8 @@ def process_events():
                 "pretty_venue_name": pretty_fields.get("pretty_venue_name"),
                 "pretty_date": pretty_fields.get("pretty_date"),
                 "pretty_description": pretty_fields.get("pretty_description"),
-                "venue_url": venue_url,
+                "vibes": pretty_fields.get("vibes"),
+                "venue_url": matched_venue["url"],
                 "created_at": datetime.utcnow().isoformat()
             }).execute()
 

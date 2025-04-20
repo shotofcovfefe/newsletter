@@ -418,6 +418,7 @@ def format_events_message(
         venue = (ev.get("pretty_venue_name") or "").strip()
         date = (ev.get("pretty_date") or "").strip()
         url = (ev.get("venue_url") or "").strip()
+        vibes = (ev.get("vibes") or "").strip()
         summary = (ev.get("pretty_description") or "").strip()
 
         if url:
@@ -425,8 +426,13 @@ def format_events_message(
         else:
             venue_html = venue
 
+        if vibes:
+            vibes_html = "✨ {vibes}\n"
+        else:
+            vibes_html = ""
+
         # Start building the main event line
-        line = f"<b>{name}</b>\n📍 <i>{venue_html}</i>\n👉 {summary}\n📅 {date}"
+        line = f"<b>{name}</b>\n📍 <i>{venue_html}</i>\n👉 {summary}\n{vibes_html}📅 {date}"
 
         # Check if distance information is available and postcode was provided
         if "distance_km" in ev and postcode:
