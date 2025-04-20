@@ -427,7 +427,7 @@ def format_events_message(
             venue_html = venue
 
         if vibes:
-            vibes_html = "✨ {vibes}\n"
+            vibes_html = f"✨ {vibes}\n"
         else:
             vibes_html = ""
 
