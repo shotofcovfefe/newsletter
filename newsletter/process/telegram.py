@@ -10,15 +10,16 @@ import typing as ta
 from supabase import create_client
 from dotenv import load_dotenv
 
-# Removed unused import: round_sig
 from newsletter.utils import (is_valid_london_postcode, geocode_postcode_to_latlon, haversine_distance, calculate_bearing, bearing_to_arrow)
 
 load_dotenv()
 
+
 # Basic Logging Configuration (adjust as needed)
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
-# logger.setLevel(logging.INFO) # Set level via basicConfig
+logger.setLevel(logging.INFO)
+
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
@@ -212,7 +213,7 @@ def fetch_events(
     overall_limit: int = 5 # Default limit remains 5 for general use
 ) -> ta.List[ta.Dict[str, ta.Any]]:
     """Fetch events from events_enriched, filtered by date and location if provided."""
-    query = supabase.table("events_enriched").select("*", count='exact') # Added count
+    query = supabase.table("events_enriched").select("*", count='exact')
 
     # Date filtering
     if date_from and date_to:
@@ -376,6 +377,7 @@ def get_user_postcode(chat_id: str) -> ta.Optional[str]:
         # Example: PostgrestAPIError has http_status attribute
         logger.error(f"Error getting user postcode for {chat_id}: {e}", exc_info=True)
         return None
+
 
 def set_user_postcode(chat_id: str, postcode: str) -> bool:
     """Store or update the user's postcode using upsert. Returns True on success."""
@@ -634,6 +636,8 @@ def process_callback_query(callback_query: dict):
         logger.error(f"Could not get chat_id or message_id from callback query {query_id}")
         return
 
+    # --- Handle Specific Callbacks ---
+
     # --- Handle Random Refresh ---
     if data == "load_random":
         logger.info(f"Processing 'load_random' callback from chat {chat_id}, msg {message_id}")
@@ -642,52 +646,79 @@ def process_callback_query(callback_query: dict):
         if new_events:
             new_event = new_events[0]
             user_pc = None
-            lat, lon = None, None
+            lat, lon = None, None # User's location
             postcode_valid_and_geocoded = False
+            event_lat, event_lon = None, None # Event's location
+            maps_url = None
 
-            # Attempt to get user location for distance
+            # --- Attempt to get user location for distance calculation ---
             user_pc = get_user_postcode(chat_id)
             if user_pc and is_valid_london_postcode(user_pc):
                 lat, lon = geocode_postcode_to_latlon(user_pc)
                 if lat is not None and lon is not None:
                     postcode_valid_and_geocoded = True
-                    # Calculate and add distance if possible
+                    # Calculate distance if possible (also parses event coords)
                     ev_lat_str = new_event.get("latitude")
                     ev_lon_str = new_event.get("longitude")
                     try:
-                        ev_lat = float(ev_lat_str) if ev_lat_str is not None else math.nan
-                        ev_lon = float(ev_lon_str) if ev_lon_str is not None else math.nan
-                        if not math.isnan(ev_lat) and not math.isnan(ev_lon):
-                            dist = haversine_distance(lat, lon, ev_lat, ev_lon)
+                        temp_ev_lat = float(ev_lat_str) if ev_lat_str is not None else math.nan
+                        temp_ev_lon = float(ev_lon_str) if ev_lon_str is not None else math.nan
+                        if not math.isnan(temp_ev_lat) and not math.isnan(temp_ev_lon):
+                            event_lat, event_lon = temp_ev_lat, temp_ev_lon # Store valid coords
+                            dist = haversine_distance(lat, lon, event_lat, event_lon)
                             new_event["distance_km"] = dist # Add distance to the event dict
                     except (ValueError, TypeError):
                         logger.warning(f"Could not parse event lat/lon for random event distance: {new_event.get('event_id')}")
+                        # event_lat/event_lon remain None
 
-            keyboard = {"inline_keyboard": [[{"text": "🔄🔄🔄", "callback_data": "load_random"}]]}
+            # --- Construct Keyboard ---
+            refresh_button = {"text": "🔄🔄🔄", "callback_data": "load_random"}
+            button_row = [refresh_button] # Start row with refresh button
 
-            # Pass location info ONLY if it was successfully retrieved and event has distance calculated
+            # Try to get event coords for map link if not already parsed
+            if event_lat is None or event_lon is None:
+                 ev_lat_str = new_event.get("latitude")
+                 ev_lon_str = new_event.get("longitude")
+                 try:
+                     temp_ev_lat = float(ev_lat_str) if ev_lat_str is not None else math.nan
+                     temp_ev_lon = float(ev_lon_str) if ev_lon_str is not None else math.nan
+                     if not math.isnan(temp_ev_lat) and not math.isnan(temp_ev_lon):
+                         event_lat, event_lon = temp_ev_lat, temp_ev_lon # Store valid coords
+                 except (ValueError, TypeError):
+                      pass # Ignore errors here, just means no map link
+
+            # Add map button if coords are valid
+            if event_lat is not None and event_lon is not None:
+                maps_url = f"https://maps.google.com/?q={event_lat},{event_lon}" # Use HTTPS
+                map_button = {"text": "📍", "url": maps_url}
+                button_row.append(map_button) # Add map button to the row
+
+            keyboard = {"inline_keyboard": [button_row]} # Final keyboard
+
+            # --- Format and Edit Message ---
+            # Pass location info to formatter ONLY if it was successfully retrieved AND distance was calculated
             if postcode_valid_and_geocoded and "distance_km" in new_event:
                  new_message_text = format_events_message(
-                    events=[new_event],
-                    time_period="a random event",
-                    postcode=user_pc,
-                    user_lat=lat,
-                    user_lon=lon
-                    # is_single_event_request removed
+                    events=[new_event], time_period="a random event",
+                    postcode=user_pc, user_lat=lat, user_lon=lon
                 )
             else:
+                # Fallback: format without location info
                 new_message_text = format_events_message(
-                    events=[new_event],
-                    time_period="a random event"
-                    # is_single_event_request removed
+                    events=[new_event], time_period="a random event"
                 )
+
+            # Edit message with the potentially two-button keyboard
             edit_telegram_message(chat_id, message_id, new_message_text, reply_markup=keyboard)
         else:
+            # No new random event found
             edit_telegram_message(chat_id, message_id, "Sorry, couldn't find another random event right now.", reply_markup=None)
 
     # --- Handle Local Refresh ---
     elif data == "load_local":
         logger.info(f"Processing 'load_local' callback from chat {chat_id}, msg {message_id}")
+
+        # Get and validate user location
         user_pc = get_user_postcode(chat_id)
         if not user_pc:
              edit_telegram_message(chat_id, message_id, "Please set your location first using /updatelocation.", reply_markup=None)
@@ -700,35 +731,54 @@ def process_callback_query(callback_query: dict):
              edit_telegram_message(chat_id, message_id, f"Could not find location for {user_pc}. Please update it with /updatelocation.", reply_markup=None)
              return
 
+        # Fetch multiple local events to choose from
         today_str = datetime.datetime.utcnow().strftime("%Y-%m-%d")
         future_date = datetime.datetime.utcnow() + datetime.timedelta(days=7)
         future_str = future_date.strftime("%Y-%m-%d")
         fetched_events = fetch_events(
-            date_from=today_str,
-            date_to=future_str,
-            user_lat=lat,
-            user_lon=lon,
-            overall_limit=10
-            )
+            date_from=today_str, date_to=future_str, user_lat=lat, user_lon=lon, overall_limit=10
+        )
 
         if fetched_events:
-            new_event = random.choice(fetched_events)
-            keyboard = { "inline_keyboard": [ [{"text": "🔄🔄🔄", "callback_data": "load_local"}] ] }
+            new_event = random.choice(fetched_events) # Pick one randomly
+            event_lat, event_lon = None, None
+            maps_url = None
+
+            # --- Construct Keyboard ---
+            refresh_button = {"text": "🔄🔄🔄", "callback_data": "load_local"}
+            button_row = [refresh_button]
+
+            # Try to get event coords for map link
+            ev_lat_str = new_event.get("latitude")
+            ev_lon_str = new_event.get("longitude")
+            try:
+                 temp_ev_lat = float(ev_lat_str) if ev_lat_str is not None else math.nan
+                 temp_ev_lon = float(ev_lon_str) if ev_lon_str is not None else math.nan
+                 if not math.isnan(temp_ev_lat) and not math.isnan(temp_ev_lon):
+                     event_lat, event_lon = temp_ev_lat, temp_ev_lon
+                     maps_url = f"https://maps.google.com/?q={event_lat},{event_lon}"
+                     map_button = {"text": "📍", "url": maps_url}
+                     button_row.append(map_button)
+            except (ValueError, TypeError):
+                 logger.warning(f"Could not parse lat/lon for map link for event {new_event.get('event_id')}")
+                 pass
+
+            keyboard = {"inline_keyboard": [button_row]}
+
+            # --- Format and Edit Message ---
             new_message_text = format_events_message(
-                events=[new_event],
-                postcode=user_pc,
-                user_lat=lat,
-                user_lon=lon,
-                time_period="nearby"
-                # is_single_event_request removed
+                events=[new_event], postcode=user_pc, user_lat=lat, user_lon=lon, time_period="nearby"
             )
             edit_telegram_message(chat_id, message_id, new_message_text, reply_markup=keyboard)
         else:
+             # No other local events found
              edit_telegram_message(chat_id, message_id, f"Sorry, couldn't find any other local events near {user_pc} in the next 7 days.", reply_markup=None)
 
     # --- Handle Today Refresh ---
     elif data == "load_today":
         logger.info(f"Processing 'load_today' callback from chat {chat_id}, msg {message_id}")
+
+        # Get and validate user location
         user_pc = get_user_postcode(chat_id)
         if not user_pc or not is_valid_london_postcode(user_pc):
              edit_telegram_message(chat_id, message_id, "Please set a valid London location first using /updatelocation.", reply_markup=None)
@@ -738,33 +788,52 @@ def process_callback_query(callback_query: dict):
              edit_telegram_message(chat_id, message_id, f"Could not find location for {user_pc}. Please update it.", reply_markup=None)
              return
 
+        # Fetch multiple events for today
         today_str = datetime.datetime.utcnow().strftime("%Y-%m-%d")
         fetched_events = fetch_events(
-            date_from=today_str,
-            date_to=today_str,
-            user_lat=lat,
-            user_lon=lon,
-            overall_limit=10
-            )
+            date_from=today_str, date_to=today_str, user_lat=lat, user_lon=lon, overall_limit=10
+        )
 
         if fetched_events:
             new_event = random.choice(fetched_events)
-            keyboard = { "inline_keyboard": [ [{"text": "🔄🔄🔄", "callback_data": "load_today"}] ] }
+            event_lat, event_lon = None, None
+            maps_url = None
+
+            # --- Construct Keyboard ---
+            refresh_button = {"text": "🔄🔄🔄", "callback_data": "load_today"}
+            button_row = [refresh_button]
+
+            # Try to get event coords for map link
+            ev_lat_str = new_event.get("latitude")
+            ev_lon_str = new_event.get("longitude")
+            try:
+                 temp_ev_lat = float(ev_lat_str) if ev_lat_str is not None else math.nan
+                 temp_ev_lon = float(ev_lon_str) if ev_lon_str is not None else math.nan
+                 if not math.isnan(temp_ev_lat) and not math.isnan(temp_ev_lon):
+                     event_lat, event_lon = temp_ev_lat, temp_ev_lon
+                     maps_url = f"https://maps.google.com/?q={event_lat},{event_lon}"
+                     map_button = {"text": "📍", "url": maps_url}
+                     button_row.append(map_button)
+            except (ValueError, TypeError):
+                 logger.warning(f"Could not parse lat/lon for map link for event {new_event.get('event_id')}")
+                 pass
+
+            keyboard = {"inline_keyboard": [button_row]}
+
+            # --- Format and Edit Message ---
             new_message_text = format_events_message(
-                events=[new_event],
-                postcode=user_pc,
-                user_lat=lat,
-                user_lon=lon,
-                time_period="today"
-                # is_single_event_request removed
+                events=[new_event], postcode=user_pc, user_lat=lat, user_lon=lon, time_period="today"
             )
             edit_telegram_message(chat_id, message_id, new_message_text, reply_markup=keyboard)
         else:
+             # No other events found today
              edit_telegram_message(chat_id, message_id, f"Sorry, couldn't find any other events today near {user_pc}.", reply_markup=None)
 
     # --- Handle Tomorrow Refresh ---
     elif data == "load_tomorrow":
         logger.info(f"Processing 'load_tomorrow' callback from chat {chat_id}, msg {message_id}")
+
+        # Get and validate user location
         user_pc = get_user_postcode(chat_id)
         if not user_pc or not is_valid_london_postcode(user_pc):
              edit_telegram_message(chat_id, message_id, "Please set a valid London location first using /updatelocation.", reply_markup=None)
@@ -774,33 +843,52 @@ def process_callback_query(callback_query: dict):
              edit_telegram_message(chat_id, message_id, f"Could not find location for {user_pc}. Please update it.", reply_markup=None)
              return
 
+        # Fetch multiple events for tomorrow
         tomorrow_date = datetime.datetime.utcnow() + datetime.timedelta(days=1)
         tomorrow_str = tomorrow_date.strftime("%Y-%m-%d")
         fetched_events = fetch_events(
-            date_from=tomorrow_str,
-            date_to=tomorrow_str,
-            user_lat=lat,
-            user_lon=lon,
-            overall_limit=10
-            )
+            date_from=tomorrow_str, date_to=tomorrow_str, user_lat=lat, user_lon=lon, overall_limit=10
+        )
 
         if fetched_events:
             new_event = random.choice(fetched_events)
-            keyboard = { "inline_keyboard": [ [{"text": "🔄🔄🔄", "callback_data": "load_tomorrow"}] ] }
+            event_lat, event_lon = None, None
+            maps_url = None
+
+            # --- Construct Keyboard ---
+            refresh_button = {"text": "🔄🔄🔄", "callback_data": "load_tomorrow"}
+            button_row = [refresh_button]
+
+            # Try to get event coords for map link
+            ev_lat_str = new_event.get("latitude")
+            ev_lon_str = new_event.get("longitude")
+            try:
+                 temp_ev_lat = float(ev_lat_str) if ev_lat_str is not None else math.nan
+                 temp_ev_lon = float(ev_lon_str) if ev_lon_str is not None else math.nan
+                 if not math.isnan(temp_ev_lat) and not math.isnan(temp_ev_lon):
+                     event_lat, event_lon = temp_ev_lat, temp_ev_lon
+                     maps_url = f"https://maps.google.com/?q={event_lat},{event_lon}"
+                     map_button = {"text": "📍", "url": maps_url}
+                     button_row.append(map_button)
+            except (ValueError, TypeError):
+                 logger.warning(f"Could not parse lat/lon for map link for event {new_event.get('event_id')}")
+                 pass
+
+            keyboard = {"inline_keyboard": [button_row]}
+
+            # --- Format and Edit Message ---
             new_message_text = format_events_message(
-                events=[new_event],
-                postcode=user_pc,
-                user_lat=lat,
-                user_lon=lon,
-                time_period="tomorrow"
-                # is_single_event_request removed
+                events=[new_event], postcode=user_pc, user_lat=lat, user_lon=lon, time_period="tomorrow"
             )
             edit_telegram_message(chat_id, message_id, new_message_text, reply_markup=keyboard)
         else:
+             # No other events found tomorrow
              edit_telegram_message(chat_id, message_id, f"Sorry, couldn't find any other events tomorrow near {user_pc}.", reply_markup=None)
 
     else:
+        # Handle unrecognized callback data
         logger.warning(f"Received unhandled callback data: {data} from chat {chat_id}")
+
 
 
 # ---------------------------------------------------------------------
@@ -808,7 +896,7 @@ def process_callback_query(callback_query: dict):
 # ---------------------------------------------------------------------
 
 def process_message(msg: dict):
-    # Removed unused message_id assignment
+    # Removed unused message_id assignment here
     chat_info = msg.get('chat', {})
     chat_id = str(chat_info.get('id', ''))
     chat_type = chat_info.get('type', '')
@@ -825,11 +913,12 @@ def process_message(msg: dict):
         return
 
     if msg.get('edit_date'):
-        return
+        return # Ignore edited messages for command processing
 
     logger.info(
         f"Processing message from chat {chat_id} (type: {chat_type}, user: {user_id} '{first_name}'): '{text_raw}'")
 
+    # Update chat info and ensure subscription (if private chat)
     try:
         supabase.rpc(
             'upsert_telegram_chat',
@@ -851,21 +940,7 @@ def process_message(msg: dict):
     except Exception as exc:
         logger.error(f"Error updating chat/subscriber info for chat {chat_id}: {exc}", exc_info=True)
 
-    # Updated help text slightly
-    help_text = (
-        "Welcome to Niche London Events! 👋\n\n"
-        "I find unique and interesting events happening across London.\n\n"
-        "<b>Commands:</b>\n"
-        "/local - Show a nearby event (needs location set)\n"
-        "/today - Show an event happening today (needs location)\n"
-        "/tomorrow - Show an event happening tomorrow (needs location)\n"
-        "/random - Show a random event in the next week\n"
-        #"/best - Our top picks coming soon! 🏆\n"
-        "/updatelocation - Set/update your London postcode\n"
-        "/help - Show this message\n\n"
-        #"/subscribe and /unsubscribe manage the weekly roundup."
-        "Tip: You can also just send me a valid London postcode (e.g., E8 3PN) to set your location!"
-    )
+    # Define help text
 
     help_text = (
         "Welcome to <i>Niche London</i>! 👋\n\n"
@@ -881,6 +956,8 @@ def process_message(msg: dict):
         "/updatelocation - Update map pinhead 📍\n"
         "Or, send a valid UK postcode (e.g., <i>E8 3PN</i>) for local events!"
     )
+
+    # --- Command Handling ---
 
     if text_lower in ["/start", "/help", "help", "hello", "hi", "?"]:
         awaiting_location_update[chat_id] = False
@@ -901,6 +978,7 @@ def process_message(msg: dict):
         if chat_type == 'private':
             awaiting_location_update[chat_id] = False
             try:
+                # Assuming delete returns useful info or raises error on failure
                 supabase.table("telegram_subscribers").delete().eq("chat_id", chat_id).execute()
                 send_telegram_message(chat_id, "You've been unsubscribed from the weekly roundup.")
             except Exception as exc:
@@ -927,28 +1005,43 @@ def process_message(msg: dict):
                                   f"Sorry, I couldn't find coordinates for '{user_pc}'. Try updating your location with /updatelocation using a different postcode.")
             return
 
+        # Fetch ONE local event
         today_str = datetime.datetime.utcnow().strftime("%Y-%m-%d")
         future_date = datetime.datetime.utcnow() + datetime.timedelta(days=7)
         future_str = future_date.strftime("%Y-%m-%d")
-
         events = fetch_events(
-            date_from=today_str,
-            date_to=future_str,
-            user_lat=lat,
-            user_lon=lon,
-            overall_limit=1
+            date_from=today_str, date_to=future_str, user_lat=lat, user_lon=lon, overall_limit=1
         )
 
         if events:
             event = events[0]
-            keyboard = {"inline_keyboard": [[{"text": "🔄🔄🔄", "callback_data": "load_local"}]]}
+            event_lat, event_lon = None, None
+            maps_url = None
+
+            # --- Construct Keyboard ---
+            refresh_button = {"text": "🔄🔄🔄", "callback_data": "load_local"}
+            button_row = [refresh_button] # Start row with refresh button
+
+            # Try to get event coords for map link
+            ev_lat_str = event.get("latitude")
+            ev_lon_str = event.get("longitude")
+            try:
+                 temp_ev_lat = float(ev_lat_str) if ev_lat_str is not None else math.nan
+                 temp_ev_lon = float(ev_lon_str) if ev_lon_str is not None else math.nan
+                 if not math.isnan(temp_ev_lat) and not math.isnan(temp_ev_lon):
+                     event_lat, event_lon = temp_ev_lat, temp_ev_lon # Store valid coords
+                     maps_url = f"https://maps.google.com/?q={event_lat},{event_lon}" # Use HTTPS
+                     map_button = {"text": "📍", "url": maps_url}
+                     button_row.append(map_button) # Add map button to the row
+            except (ValueError, TypeError):
+                 logger.warning(f"Could not parse lat/lon for map link for event {event.get('event_id')}")
+                 pass # Ignore if parsing fails, map button won't be added
+
+            keyboard = {"inline_keyboard": [button_row]} # Final keyboard
+
+            # --- Format and Send Message ---
             message_text = format_events_message(
-                events=[event],
-                postcode=user_pc,
-                user_lat=lat,
-                user_lon=lon,
-                time_period="nearby"
-                # is_single_event_request removed
+                events=[event], postcode=user_pc, user_lat=lat, user_lon=lon, time_period="nearby"
             )
             send_telegram_message(chat_id, message_text, reply_markup=keyboard)
         else:
@@ -966,25 +1059,41 @@ def process_message(msg: dict):
                                   f"Sorry, couldn't find coordinates for '{user_pc}'. Try updating your location.")
             return
 
+        # Fetch ONE event for today
         today_str = datetime.datetime.utcnow().strftime("%Y-%m-%d")
         events = fetch_events(
-            date_from=today_str,
-            date_to=today_str,
-            user_lat=lat,
-            user_lon=lon,
-            overall_limit=1
+            date_from=today_str, date_to=today_str, user_lat=lat, user_lon=lon, overall_limit=1
         )
 
         if events:
             event = events[0]
-            keyboard = {"inline_keyboard": [[{"text": "🔄🔄🔄", "callback_data": "load_today"}]]}
+            event_lat, event_lon = None, None
+            maps_url = None
+
+            # --- Construct Keyboard ---
+            refresh_button = {"text": "🔄🔄🔄", "callback_data": "load_today"}
+            button_row = [refresh_button]
+
+            # Try to get event coords for map link
+            ev_lat_str = event.get("latitude")
+            ev_lon_str = event.get("longitude")
+            try:
+                 temp_ev_lat = float(ev_lat_str) if ev_lat_str is not None else math.nan
+                 temp_ev_lon = float(ev_lon_str) if ev_lon_str is not None else math.nan
+                 if not math.isnan(temp_ev_lat) and not math.isnan(temp_ev_lon):
+                     event_lat, event_lon = temp_ev_lat, temp_ev_lon
+                     maps_url = f"https://maps.google.com/?q={event_lat},{event_lon}"
+                     map_button = {"text": "📍", "url": maps_url}
+                     button_row.append(map_button)
+            except (ValueError, TypeError):
+                 logger.warning(f"Could not parse lat/lon for map link for event {event.get('event_id')}")
+                 pass
+
+            keyboard = {"inline_keyboard": [button_row]}
+
+            # --- Format and Send Message ---
             message_text = format_events_message(
-                events=[event],
-                postcode=user_pc,
-                user_lat=lat,
-                user_lon=lon,
-                time_period="today"
-                # is_single_event_request removed
+                events=[event], postcode=user_pc, user_lat=lat, user_lon=lon, time_period="today"
             )
             send_telegram_message(chat_id, message_text, reply_markup=keyboard)
         else:
@@ -1003,26 +1112,42 @@ def process_message(msg: dict):
                                   f"Sorry, couldn't find coordinates for '{user_pc}'. Try updating your location.")
             return
 
+        # Fetch ONE event for tomorrow
         tomorrow_date = datetime.datetime.utcnow() + datetime.timedelta(days=1)
         tomorrow_str = tomorrow_date.strftime("%Y-%m-%d")
         events = fetch_events(
-            date_from=tomorrow_str,
-            date_to=tomorrow_str,
-            user_lat=lat,
-            user_lon=lon,
-            overall_limit=1
+            date_from=tomorrow_str, date_to=tomorrow_str, user_lat=lat, user_lon=lon, overall_limit=1
         )
 
         if events:
             event = events[0]
-            keyboard = {"inline_keyboard": [[{"text": "🔄🔄🔄", "callback_data": "load_tomorrow"}]]}
+            event_lat, event_lon = None, None
+            maps_url = None
+
+            # --- Construct Keyboard ---
+            refresh_button = {"text": "🔄🔄🔄", "callback_data": "load_tomorrow"}
+            button_row = [refresh_button]
+
+            # Try to get event coords for map link
+            ev_lat_str = event.get("latitude")
+            ev_lon_str = event.get("longitude")
+            try:
+                 temp_ev_lat = float(ev_lat_str) if ev_lat_str is not None else math.nan
+                 temp_ev_lon = float(ev_lon_str) if ev_lon_str is not None else math.nan
+                 if not math.isnan(temp_ev_lat) and not math.isnan(temp_ev_lon):
+                     event_lat, event_lon = temp_ev_lat, temp_ev_lon
+                     maps_url = f"https://maps.google.com/?q={event_lat},{event_lon}"
+                     map_button = {"text": "📍", "url": maps_url}
+                     button_row.append(map_button)
+            except (ValueError, TypeError):
+                 logger.warning(f"Could not parse lat/lon for map link for event {event.get('event_id')}")
+                 pass
+
+            keyboard = {"inline_keyboard": [button_row]}
+
+            # --- Format and Send Message ---
             message_text = format_events_message(
-                events=[event],
-                postcode=user_pc,
-                user_lat=lat,
-                user_lon=lon,
-                time_period="tomorrow"
-                # is_single_event_request removed
+                events=[event], postcode=user_pc, user_lat=lat, user_lon=lon, time_period="tomorrow"
             )
             send_telegram_message(chat_id, message_text, reply_markup=keyboard)
         else:
@@ -1037,42 +1162,65 @@ def process_message(msg: dict):
             user_pc = None
             lat, lon = None, None
             postcode_valid_and_geocoded = False
+            event_lat, event_lon = None, None # To store coords for map link
+            maps_url = None
 
-            # Attempt to get user location for distance
+            # Attempt to get user location for distance calculation
             user_pc = get_user_postcode(chat_id)
             if user_pc and is_valid_london_postcode(user_pc):
                 lat, lon = geocode_postcode_to_latlon(user_pc)
                 if lat is not None and lon is not None:
                     postcode_valid_and_geocoded = True
-                    # Calculate and add distance if possible
+                    # Calculate distance if possible (also try parsing coords here)
                     ev_lat_str = event.get("latitude")
                     ev_lon_str = event.get("longitude")
                     try:
-                        ev_lat = float(ev_lat_str) if ev_lat_str is not None else math.nan
-                        ev_lon = float(ev_lon_str) if ev_lon_str is not None else math.nan
-                        if not math.isnan(ev_lat) and not math.isnan(ev_lon):
-                            dist = haversine_distance(lat, lon, ev_lat, ev_lon)
+                        temp_ev_lat = float(ev_lat_str) if ev_lat_str is not None else math.nan
+                        temp_ev_lon = float(ev_lon_str) if ev_lon_str is not None else math.nan
+                        if not math.isnan(temp_ev_lat) and not math.isnan(temp_ev_lon):
+                            event_lat, event_lon = temp_ev_lat, temp_ev_lon # Store valid coords for map link too
+                            dist = haversine_distance(lat, lon, event_lat, event_lon)
                             event["distance_km"] = dist # Add distance to the event dict
                     except (ValueError, TypeError):
                         logger.warning(f"Could not parse event lat/lon for random event distance: {event.get('event_id')}")
+                        # event_lat/event_lon remain None if parsing failed
 
-            keyboard = {"inline_keyboard": [[{"text": "🔄🔄🔄", "callback_data": "load_random"}]]}
+            # --- Construct Keyboard ---
+            refresh_button = {"text": "🔄🔄🔄", "callback_data": "load_random"}
+            button_row = [refresh_button]
 
-            # Pass location info ONLY if it was successfully retrieved and event has distance calculated
+            # Try to get event coords for map link (check if already parsed)
+            if event_lat is None or event_lon is None: # If not parsed during distance calc
+                 ev_lat_str = event.get("latitude")
+                 ev_lon_str = event.get("longitude")
+                 try:
+                     temp_ev_lat = float(ev_lat_str) if ev_lat_str is not None else math.nan
+                     temp_ev_lon = float(ev_lon_str) if ev_lon_str is not None else math.nan
+                     if not math.isnan(temp_ev_lat) and not math.isnan(temp_ev_lon):
+                         event_lat, event_lon = temp_ev_lat, temp_ev_lon
+                 except (ValueError, TypeError):
+                      logger.warning(f"Could not parse lat/lon for map link for event {event.get('event_id')}")
+                      pass # Ignore if parsing fails here too
+
+            # Add map button if coords are valid
+            if event_lat is not None and event_lon is not None:
+                maps_url = f"https://maps.google.com/?q={event_lat},{event_lon}"
+                map_button = {"text": "📍", "url": maps_url}
+                button_row.append(map_button)
+
+            keyboard = {"inline_keyboard": [button_row]}
+
+            # --- Format and Send Message ---
+            # Pass location info ONLY if it was successfully retrieved AND distance was calculated
             if postcode_valid_and_geocoded and "distance_km" in event:
                  message_text = format_events_message(
-                    events=[event],
-                    time_period="a random event",
-                    postcode=user_pc,
-                    user_lat=lat,
-                    user_lon=lon
-                    # is_single_event_request removed
+                    events=[event], time_period="a random event",
+                    postcode=user_pc, user_lat=lat, user_lon=lon
                 )
             else:
+                 # Fallback: format without location info
                  message_text = format_events_message(
-                    events=[event],
-                    time_period="a random event"
-                    # is_single_event_request removed
+                    events=[event], time_period="a random event"
                 )
             send_telegram_message(chat_id, message_text, reply_markup=keyboard)
         else:
@@ -1081,6 +1229,7 @@ def process_message(msg: dict):
     elif is_valid_london_postcode(text_raw.upper()):
         postcode_norm = text_raw.upper()
         if awaiting_location_update.get(chat_id, False):
+            # Handle location update request
             lat, lon = geocode_postcode_to_latlon(postcode_norm)
             if lat is not None and lon is not None:
                 # Use the fixed set_user_postcode which returns True/False
@@ -1090,12 +1239,13 @@ def process_message(msg: dict):
                 else:
                     send_telegram_message(chat_id, "⚠️ There was an error saving your postcode. Please try again.")
             else:
+                # Geocoding failed
                 send_telegram_message(chat_id,
                                       f"⚠️ Couldn't find coordinates for {postcode_norm}. Please try a different London postcode.")
-            # Reset flag regardless of success/failure
+            # Reset flag regardless of success/failure of geocoding or saving
             awaiting_location_update[chat_id] = False
         else:
-            # Direct postcode search logic (unchanged from previous fix state)
+            # Handle direct postcode search (shows multiple events, no buttons)
             lat, lon = geocode_postcode_to_latlon(postcode_norm)
             if not lat or not lon:
                 send_telegram_message(chat_id,
@@ -1106,6 +1256,7 @@ def process_message(msg: dict):
             future_date = datetime.datetime.utcnow() + datetime.timedelta(days=7)
             future_str = future_date.strftime("%Y-%m-%d")
 
+            # Fetch multiple events (using default limit, e.g., 5)
             events = fetch_events(
                 date_from=today_str,
                 date_to=future_str,
@@ -1113,6 +1264,7 @@ def process_message(msg: dict):
                 user_lon=lon
             )
             if events:
+                # Use send_event_messages to send them one by one WITHOUT buttons
                 send_event_messages(
                     chat_id=chat_id,
                     events=events,
@@ -1125,7 +1277,7 @@ def process_message(msg: dict):
 
     else:
         if not awaiting_location_update.get(chat_id, False):
-            send_telegram_message(chat_id, "Sorry, I didn't understand that. Try /help to see available commands.")
+             send_telegram_message(chat_id, "Sorry, I didn't understand that. Try /help to see available commands.")
 
 
 # ---------------------------------------------------------------------
