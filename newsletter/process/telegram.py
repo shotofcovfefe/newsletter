@@ -678,7 +678,7 @@ def process_callback_query(callback_query: dict):
                 try:
                     search_query = f"{venue_name}, {venue_postcode}"
                     encoded_query = urllib.parse.quote_plus(search_query)
-                    maps_url = f"https://www.google.com/maps/search/?api=1&query=LATITUDE,LONGITUDE{encoded_query}" # Use HTTPS
+                    maps_url = f"https://www.google.com/maps/search/?api=1&query={encoded_query}"
                     map_button = {"text": "📍", "url": maps_url}
                     button_row.append(map_button)
                 except Exception as e:
@@ -1159,7 +1159,6 @@ def process_message(msg: dict):
                             event["distance_km"] = dist
                     except (ValueError, TypeError): pass
 
-            send_telegram_message(chat_id, "🏆 Here are some top picks for the week:")
             send_event_messages(
                  chat_id=chat_id, events=events,
                  postcode=user_pc if postcode_valid_and_geocoded else "",
