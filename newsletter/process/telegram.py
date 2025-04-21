@@ -10,26 +10,32 @@ import typing as ta
 from supabase import create_client
 from dotenv import load_dotenv
 
-from newsletter.constants import RANDOM_EVENT_MESSAGES
-from newsletter.utils import (is_valid_london_postcode, geocode_postcode_to_latlon, haversine_distance, round_sig, calculate_bearing, bearing_to_arrow)
+# Removed unused import: round_sig
+from newsletter.utils import (is_valid_london_postcode, geocode_postcode_to_latlon, haversine_distance, calculate_bearing, bearing_to_arrow)
 
 load_dotenv()
 
+# Basic Logging Configuration (adjust as needed)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
+# logger.setLevel(logging.INFO) # Set level via basicConfig
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+
+# Handle potential missing environment variables during startup
+if not all([SUPABASE_URL, SUPABASE_KEY, TELEGRAM_BOT_TOKEN]):
+    logger.error("Missing required environment variables (SUPABASE_URL, SUPABASE_KEY, TELEGRAM_BOT_TOKEN). Exiting.")
+    exit() # Or raise an exception
 
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 awaiting_location_update = {}  # dict: {chat_id: bool}
 
 # ---------------------------------------------------------------------
-# Telegram Helper
+# Telegram Helper (Keep as is)
 # ---------------------------------------------------------------------
-
 
 def get_telegram_updates(offset: ta.Optional[int] = None) -> ta.List[ta.Dict]:
     """
@@ -37,6 +43,7 @@ def get_telegram_updates(offset: ta.Optional[int] = None) -> ta.List[ta.Dict]:
     By default, sets a 30 second timeout to allow for long-polling.
     """
     if not TELEGRAM_BOT_TOKEN:
+        # This check might be redundant due to the startup check, but kept for safety
         logger.error("TELEGRAM_BOT_TOKEN not configured.")
         return []
 
@@ -46,14 +53,26 @@ def get_telegram_updates(offset: ta.Optional[int] = None) -> ta.List[ta.Dict]:
         params["offset"] = offset
 
     try:
-        r = requests.get(url, params=params)
+        # Increased overall request timeout
+        r = requests.get(url, params=params, timeout=40)
         if r.status_code == 200:
             return r.json().get('result', [])
+        # Handle Telegram's 502 error during restarts gracefully
+        elif r.status_code == 502:
+             logger.warning("Received 502 Bad Gateway from Telegram, likely restarting. Will retry.")
+             time.sleep(5) # Wait a bit before retrying
+             return []
         else:
-            logger.error(f"Failed to get updates: {r.text}")
+            logger.error(f"Failed to get updates: {r.status_code} - {r.text}")
             return []
-    except Exception as exc:
+    except requests.exceptions.Timeout:
+        logger.warning("Telegram getUpdates request timed out. Retrying.")
+        return []
+    except requests.exceptions.RequestException as exc:
         logger.error(f"Error getting updates: {exc}")
+        return []
+    except Exception as exc:
+        logger.error(f"Unexpected error getting updates: {exc}", exc_info=True)
         return []
 
 
@@ -64,8 +83,15 @@ def send_telegram_message(chat_id: str, text: str, reply_markup: ta.Optional[ta.
         return False
 
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    # Telegram's max message length is 4096, leave a little buffer
     max_length = 4000
-    parts = [text[i:i + max_length] for i in range(0, len(text), max_length)]
+    parts = []
+    if len(text) > max_length:
+        # Basic split logic, can be improved to split at newlines etc.
+        parts = [text[i:i + max_length] for i in range(0, len(text), max_length)]
+    else:
+        parts = [text]
+
     success = True
 
     for i, part in enumerate(parts):
@@ -80,16 +106,20 @@ def send_telegram_message(chat_id: str, text: str, reply_markup: ta.Optional[ta.
              payload["reply_markup"] = json.dumps(reply_markup) # Use json.dumps here
 
         try:
-            resp = requests.post(url, json=payload)
+            # Added timeout to post request
+            resp = requests.post(url, json=payload, timeout=10)
             if resp.status_code != 200:
-                logger.error(f"Failed to send message part to {chat_id}: {resp.text}")
+                logger.error(f"Failed to send message part {i+1}/{len(parts)} to {chat_id}: {resp.status_code} - {resp.text}")
                 success = False
-        except Exception as exc:
+        except requests.exceptions.RequestException as exc:
             logger.error(f"Error sending message part: {exc}")
+            success = False
+        except Exception as exc:
+            logger.error(f"Unexpected error sending message part: {exc}", exc_info=True)
             success = False
         # Small delay between parts if splitting
         if len(parts) > 1 and i < len(parts) - 1:
-            time.sleep(0.1)
+            time.sleep(0.2) # Increased slightly
 
     return success
 
@@ -101,6 +131,12 @@ def edit_telegram_message(chat_id: str, message_id: int, text: str, reply_markup
         return False
 
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/editMessageText"
+    # Telegram's max message length is 4096
+    max_length = 4000
+    if len(text) > max_length:
+        logger.warning(f"Attempting to edit message {message_id} in chat {chat_id} with text longer than {max_length} chars. Truncating.")
+        text = text[:max_length]
+
     payload = {
         "chat_id": chat_id,
         "message_id": message_id,
@@ -111,19 +147,34 @@ def edit_telegram_message(chat_id: str, message_id: int, text: str, reply_markup
     if reply_markup:
         # Inline keyboard markup needs to be a JSON string for editing
         payload["reply_markup"] = json.dumps(reply_markup)
+    else:
+        # Explicitly send empty reply_markup if we intend to remove the keyboard
+        payload["reply_markup"] = json.dumps({})
+
 
     try:
-        resp = requests.post(url, json=payload)
+        # Added timeout
+        resp = requests.post(url, json=payload, timeout=10)
         if resp.status_code != 200:
              # Gracefully handle the "message is not modified" error
-            if "message is not modified" in resp.text:
+            resp_json = {}
+            try:
+                resp_json = resp.json()
+            except json.JSONDecodeError:
+                pass # Keep resp_json as {} if response is not valid JSON
+
+            if resp_json.get("description") and "message is not modified" in resp_json["description"].lower():
                 logger.info(f"Message {message_id} in chat {chat_id} was not modified (content likely the same).")
                 return True # Treat as success, no change needed
-            logger.error(f"Failed to edit message {message_id} in chat {chat_id}: {resp.text}")
-            return False
+            else:
+                logger.error(f"Failed to edit message {message_id} in chat {chat_id}: {resp.status_code} - {resp.text}")
+                return False
         return True
-    except Exception as exc:
+    except requests.exceptions.RequestException as exc:
         logger.error(f"Error editing message: {exc}")
+        return False
+    except Exception as exc:
+        logger.error(f"Unexpected error editing message: {exc}", exc_info=True)
         return False
 
 
@@ -134,17 +185,23 @@ def answer_callback_query(callback_query_id: str) -> bool:
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/answerCallbackQuery"
     payload = {"callback_query_id": callback_query_id}
     try:
-        resp = requests.post(url, json=payload)
-        return resp.status_code == 200
-    except Exception as exc:
+        # Added timeout
+        resp = requests.post(url, json=payload, timeout=5)
+        if resp.status_code != 200:
+            logger.error(f"Failed to answer callback query {callback_query_id}: {resp.status_code} - {resp.text}")
+            return False
+        return True
+    except requests.exceptions.RequestException as exc:
         logger.error(f"Error answering callback query: {exc}")
+        return False
+    except Exception as exc:
+        logger.error(f"Unexpected error answering callback query: {exc}", exc_info=True)
         return False
 
 
 # ---------------------------------------------------------------------
-# Fetch Events
+# Fetch Events (Keep as is, overall_limit is controlled by caller)
 # ---------------------------------------------------------------------
-
 def fetch_events(
     date_from: ta.Optional[str] = None,
     date_to: ta.Optional[str] = None,
@@ -152,58 +209,90 @@ def fetch_events(
     user_lon: ta.Optional[float] = None,
     max_distance_km: float = 15.0,
     limit_per_venue: int = 1,
-    overall_limit: int = 5
+    overall_limit: int = 5 # Default limit remains 5 for general use
 ) -> ta.List[ta.Dict[str, ta.Any]]:
     """Fetch events from events_enriched, filtered by date and location if provided."""
-    query = supabase.table("events_enriched").select("*")
+    query = supabase.table("events_enriched").select("*", count='exact') # Added count
 
+    # Date filtering
     if date_from and date_to:
         if date_from == date_to:
+            # For single day, include events exactly on that date
             query = query.eq("event_date", date_from)
         else:
+            # For range, include from start date up to (but not including) end date
             query = query.gte("event_date", date_from).lt("event_date", date_to)
     elif date_from:
+        # Only start date provided
         query = query.gte("event_date", date_from)
     elif date_to:
-        query = query.lt("event_date", date_to)
+         # Only end date provided (less common use case)
+         query = query.lt("event_date", date_to)
+    # If neither date_from nor date_to, it fetches all future events implicitly if combined with location sort later? No, let's ensure it fetches future events if no dates given
+    if not date_from and not date_to:
+         today_str = datetime.datetime.utcnow().strftime("%Y-%m-%d")
+         query = query.gte("event_date", today_str)
+
 
     try:
         resp = query.execute()
         data = resp.data or []
+        count = resp.count # Get the total count matching filters *before* location calc
+        # logger.info(f"Initial fetch count for query: {count}") # Debug log
     except Exception as exc:
-        logger.error(f"Error fetching events: {exc}")
+        logger.error(f"Error fetching events from Supabase: {exc}", exc_info=True)
         return []
+
+    # Location filtering and distance calculation
+    events_with_distance = []
     if user_lat is not None and user_lon is not None:
         for row in data:
             ev_lat = row.get("latitude")
             ev_lon = row.get("longitude")
+            # Skip events without valid coordinates
             if ev_lat is None or ev_lon is None:
-                row["distance_km"] = 9999999
-            else:
+                continue # Don't add distance, just skip
+            try:
                 dist = haversine_distance(
                     lat1=user_lat,
                     lon1=user_lon,
                     lat2=float(ev_lat),
                     lon2=float(ev_lon)
                 )
-                row["distance_km"] = dist
-        data = [r for r in data if r["distance_km"] <= max_distance_km]
+                # Filter by distance *before* adding to the list
+                if dist <= max_distance_km:
+                    row["distance_km"] = dist
+                    events_with_distance.append(row)
+            except (ValueError, TypeError):
+                 logger.warning(f"Could not parse lat/lon for event {row.get('event_id')}: lat={ev_lat}, lon={ev_lon}")
+                 continue # Skip if coordinates are invalid
+        # If location provided, use the distance-filtered list
+        data = events_with_distance
+    # else: data remains the list fetched initially if no location provided
 
+    # Apply limit per venue *after* distance filtering
     by_venue = {}
+    filtered_by_venue = []
     for r in data:
         v_id = r.get("venue_id")
         if v_id not in by_venue:
-            by_venue[v_id] = []
-        if len(by_venue[v_id]) < limit_per_venue:
-            by_venue[v_id].append(r)
+            by_venue[v_id] = 0
+        if by_venue[v_id] < limit_per_venue:
+            filtered_by_venue.append(r)
+            by_venue[v_id] += 1
 
-    filtered = [event for venue_events in by_venue.values() for event in venue_events]
+    # Sort the results
     if user_lat is not None and user_lon is not None:
-        sorted_events = sorted(filtered, key=lambda x: x["distance_km"])
+        # Sort by distance if location was used
+        sorted_events = sorted(filtered_by_venue, key=lambda x: x["distance_km"])
     else:
-        sorted_events = sorted(filtered, key=lambda x: x["event_date"])
+        # Otherwise, sort by date (primary) and then maybe name (secondary)?
+        sorted_events = sorted(filtered_by_venue, key=lambda x: (x["event_date"], x.get("pretty_event_name", "")))
 
+    # Apply the overall limit *after* sorting
+    # logger.info(f"Returning {min(len(sorted_events), overall_limit)} events out of {len(sorted_events)} post-filtering.") # Debug log
     return sorted_events[:overall_limit]
+
 
 def fetch_random_events(days_ahead: int = 7, limit: int = 1) -> ta.List[ta.Dict[str, ta.Any]]:
     """Return up to `limit` random events in the next `days_ahead` days."""
@@ -211,54 +300,63 @@ def fetch_random_events(days_ahead: int = 7, limit: int = 1) -> ta.List[ta.Dict[
     future_str = (datetime.datetime.utcnow() + datetime.timedelta(days=days_ahead)).strftime("%Y-%m-%d")
 
     try:
+        # Fetching more initially to improve randomness if called repeatedly
+        potential_limit = max(limit * 5, 20) # Fetch a larger pool
         resp = (
             supabase.table("events_enriched")
             .select("*")
             .gte("event_date", today_str)
             .lt("event_date", future_str)
+            .limit(potential_limit) # Limit DB query size
             .execute()
         )
         data = resp.data or []
     except Exception as exc:
-        logger.error(f"Error fetching random events: {exc}")
+        logger.error(f"Error fetching random events: {exc}", exc_info=True)
         return []
 
+    if not data:
+        return []
+
+    # Shuffle the potentially larger list and take the required limit
     random.shuffle(data)
     return data[:limit]
 
 # ---------------------------------------------------------------------
-# Send Individual Event Messages
+# Send Individual Event Messages (Used by postcode search etc.)
 # ---------------------------------------------------------------------
 
 def send_event_messages(
     chat_id: str,
     events: ta.List[ta.Dict[str, ta.Any]],
     postcode: str = "",
-    user_lat: ta.Optional[float] = None, # Add user_lat
-    user_lon: ta.Optional[float] = None  # Add user_lon
+    user_lat: ta.Optional[float] = None,
+    user_lon: ta.Optional[float] = None
 ):
     """Send each event as an individual message, passing location info for formatting."""
     if not events:
          logger.info(f"No events provided to send_event_messages for chat {chat_id}.")
+         # Callers should handle the "no events found" message themselves
          return
 
     for event in events:
-        # Pass user_lat and user_lon to the formatting function
+        # Call format_events_message without the invalid parameter
         message = format_events_message(
             events=[event], # Format one event at a time
             postcode=postcode,
             user_lat=user_lat,
             user_lon=user_lon
+            # is_single_event_request removed
         )
         if message:
             send_telegram_message(chat_id, message)
-            time.sleep(0.2)
+            time.sleep(0.2) # Keep delay between messages
         else:
             logger.warning(f"Empty message generated by format_events_message for event: {event.get('event_id', 'N/A')}")
 
 
 # ---------------------------------------------------------------------
-# User Postcodes
+# User Postcodes (MODIFIED get_user_postcode, set_user_postcode)
 # ---------------------------------------------------------------------
 
 def get_user_postcode(chat_id: str) -> ta.Optional[str]:
@@ -267,67 +365,252 @@ def get_user_postcode(chat_id: str) -> ta.Optional[str]:
         resp = (
             supabase.table("user_postcodes")
             .select("postcode")
-            .eq("chat_id", chat_id)
-            .single()
+            .eq("chat_id", str(chat_id)) # Ensure chat_id is string
+            .single() # Returns error if not exactly one row found (or no rows)
             .execute()
         )
         return resp.data["postcode"] if resp.data else None
-    except:
+    except Exception as e: # Changed from bare except
+        # Log if it's not just 'No results found' which single() might raise implicitly
+        # Check PostgREST error details if possible if needed
+        # Example: PostgrestAPIError has http_status attribute
+        logger.error(f"Error getting user postcode for {chat_id}: {e}", exc_info=True)
         return None
 
-def set_user_postcode(chat_id: str, postcode: str) -> None:
-    """Store or update the user's postcode."""
-    supabase.table("user_postcodes").delete().eq("chat_id", chat_id).execute()
-    supabase.table("user_postcodes").insert({
-        "chat_id": chat_id,
-        "postcode": postcode,
-        "created_date": datetime.datetime.utcnow().isoformat()
-    }).execute()
+def set_user_postcode(chat_id: str, postcode: str) -> bool:
+    """Store or update the user's postcode using upsert. Returns True on success."""
+    try:
+        # Use upsert for atomicity: insert or update if chat_id exists
+        # Assumes 'chat_id' is the primary key or has a unique constraint
+        supabase.table("user_postcodes").upsert(
+            {
+                "chat_id": str(chat_id), # Ensure chat_id is string
+                "postcode": postcode.upper().strip(), # Store consistently
+                "created_date": datetime.datetime.utcnow().isoformat() # Keep track of updates
+            },
+            on_conflict="chat_id" # Specify the conflict target column
+        ).execute()
+        # If execute() doesn't raise an exception, assume success
+        return True
+    except Exception as e:
+         logger.error(f"Error setting postcode for {chat_id}: {e}", exc_info=True)
+         return False # Return False on failure
+
 
 # ---------------------------------------------------------------------
-# Broadcast Events
+# Broadcast Events (Keep as is)
 # ---------------------------------------------------------------------
 
 def broadcast_newsletter(n_events: int = 5):
     """Send weekly updates to subscribers with local or random events."""
     try:
+        # Fetch only chat_id
         resp = supabase.table("telegram_subscribers").select("chat_id").execute()
-        subscribers = resp.data or []
+        # Ensure we have a list, even if empty
+        subscribers = resp.data if hasattr(resp, 'data') and resp.data else []
     except Exception as exc:
-        logger.error(f"Error fetching subscribers for Saturday broadcast: {exc}")
+        logger.error(f"Error fetching subscribers for Saturday broadcast: {exc}", exc_info=True)
         return
+
+    logger.info(f"Starting broadcast to {len(subscribers)} subscribers.")
+    broadcast_count = 0
 
     for sub in subscribers:
         chat_id = sub.get("chat_id")
         if not chat_id:
+            logger.warning("Found subscriber entry with no chat_id.")
             continue
 
         user_pc = get_user_postcode(chat_id)
+        lat, lon = None, None
+        events_to_send = []
+        message_header = ""
+        time_period_str = "in the next 7 days" # Default period for broadcast
 
-        if user_pc and is_valid_london_postcode(user_pc):
-            lat, lon = geocode_postcode_to_latlon(user_pc)
-            if lat is not None and lon is not None:
-                today_str = datetime.datetime.utcnow().strftime("%Y-%m-%d")
-                n_days = 7
-                future_str = (datetime.datetime.utcnow() + datetime.timedelta(days=n_days)).strftime("%Y-%m-%d")
-                local_events = fetch_events(date_from=today_str, date_to=future_str, user_lat=lat, user_lon=lon)
-                msg_text = format_events_message(
-                    events=local_events,
-                    time_period=f"in the next {n_days} days",
-                    postcode=user_pc,
-                    user_lat=lat,
-                    user_lon=lon
-                )
-                send_telegram_message(chat_id, f"🎉 Saturday Update!\n\n{msg_text}")
-                continue
-            random_ev = fetch_random_events(days_ahead=7, limit=n_events)
-            msg_text = format_events_message(random_ev, time_period="some random events")
-            send_telegram_message(chat_id, "⚠️ We had trouble using your stored postcode. Here's some random events:\n\n" + msg_text)
+        if user_pc:
+            # Validate postcode format roughly first
+            if is_valid_london_postcode(user_pc): # Assuming this checks format and maybe region
+                lat, lon = geocode_postcode_to_latlon(user_pc)
+                if lat is not None and lon is not None:
+                    # Successfully got location, fetch local events
+                    today_str = datetime.datetime.utcnow().strftime("%Y-%m-%d")
+                    n_days = 7
+                    future_date = datetime.datetime.utcnow() + datetime.timedelta(days=n_days)
+                    future_str = future_date.strftime("%Y-%m-%d")
+                    # Fetch events for the next 7 days near the user
+                    events_to_send = fetch_events(
+                        date_from=today_str,
+                        date_to=future_str,
+                        user_lat=lat,
+                        user_lon=lon,
+                        overall_limit=n_events # Use the broadcast limit
+                        )
+                    message_header = f"🎉 Your Saturday Update near {user_pc}!"
+                else:
+                    # Geocoding failed for a stored postcode
+                    logger.warning(f"Failed to geocode stored postcode '{user_pc}' for chat_id {chat_id}.")
+                    message_header = f"⚠️ Couldn't use postcode {user_pc}. Showing random events."
+            else:
+                 # Stored postcode is invalid
+                 logger.warning(f"Invalid stored postcode '{user_pc}' for chat_id {chat_id}.")
+                 message_header = f"⚠️ Your stored postcode {user_pc} seems invalid. Showing random events."
         else:
-            random_ev = fetch_random_events(days_ahead=7, limit=n_events)
-            msg_text = format_events_message(random_ev, time_period="some random events")
-            send_telegram_message(chat_id, "📍 Set your location with /updatelocation for local events!\n\n" + msg_text)
+            # No postcode stored
+            message_header = "📍 Set your location with /updatelocation for local events!\n\n🎉 Your Saturday Update!"
 
+        # If local events weren't fetched successfully, get random ones
+        if not events_to_send:
+            events_to_send = fetch_random_events(days_ahead=7, limit=n_events)
+            if not message_header: # Ensure there's a header if random events are the fallback
+                message_header = "🎉 Your Saturday Update!"
+            # Only adjust time period if we actually fell back to random
+            time_period_str = "some random events"
+
+        # Format the message (handles empty events_to_send)
+        # Call format_events_message without the invalid parameter
+        msg_text = format_events_message(
+            events=events_to_send,
+            time_period=time_period_str,
+            postcode=user_pc if lat is not None else "", # Only show postcode if used
+            user_lat=lat,
+            user_lon=lon
+            # is_single_event_request removed
+        )
+
+        # Send the combined header and event list
+        full_message = f"{message_header}\n\n{msg_text}"
+        if send_telegram_message(chat_id, full_message):
+            broadcast_count += 1
+        else:
+             logger.error(f"Failed to send broadcast message to chat_id {chat_id}.")
+
+        time.sleep(0.5) # Pause between sending to different users
+
+    logger.info(f"Successfully sent broadcast to {broadcast_count}/{len(subscribers)} subscribers.")
+
+
+# ---------------------------------------------------------------------
+# Format Messages (Signature unchanged, logic handles single event via len())
+# ---------------------------------------------------------------------
+
+def format_events_message(
+    events: ta.List[ta.Dict[str, ta.Any]],
+    time_period: str = "",
+    postcode: str = "",
+    user_lat: ta.Optional[float] = None,
+    user_lon: ta.Optional[float] = None
+) -> str:
+    """
+    Format a list of events using rich HTML formatting. Includes distance and direction if available.
+    - time_period: e.g., "today", "tomorrow", "in the next 7 days"
+    - postcode: included in the distance line if provided and relevant
+    - user_lat, user_lon: User's coordinates needed for direction calculation.
+    """
+    if not events:
+        # Let the caller handle the "no events" message for better context.
+        return ""
+
+
+    lines = []
+    # --- Header Logic ---
+    # Only add a header if formatting multiple events (e.g., for broadcast, postcode search)
+    # Check length directly instead of using the removed parameter
+    if len(events) > 1:
+        header_parts = ["Here are events"]
+        if time_period: header_parts.append(time_period)
+        # Avoid adding postcode to header if it's already in the distance line
+        # if postcode and not (user_lat is not None and user_lon is not None):
+        #    header_parts.append(f"near {postcode.upper()}")
+        lines.append(" ".join(header_parts) + ":\n")
+    # If formatting a single event, the calling function adds context if needed.
+
+    # --- Event Formatting ---
+    for i, ev in enumerate(events):
+        event_lines = [] # Store lines for the current event
+
+        name = (ev.get("pretty_event_name") or "Event").strip()
+        venue = (ev.get("pretty_venue_name") or "Venue").strip()
+        date = (ev.get("pretty_date") or ev.get("event_date") or "Date TBC").strip() # Fallback date
+        url = (ev.get("venue_url") or "").strip()
+        vibes = (ev.get("vibes") or "").strip()
+        summary = (ev.get("pretty_description") or "No description available.").strip()
+
+        # Truncate long summaries
+        max_summary_len = 250
+        if len(summary) > max_summary_len:
+            summary = summary[:max_summary_len] + "..."
+
+        # Venue Name + Link
+        venue_html = f"<i>{venue}</i>" # Default italic venue
+        if url:
+            # Basic URL validation (starts with http)
+            if url.startswith("http://") or url.startswith("https://"):
+                venue_html = f'<a href="{url}">{venue}</a>'
+            else:
+                logger.warning(f"Invalid URL format for event {ev.get('event_id')}: {url}")
+                # Keep venue name without link if URL is bad
+
+        # Event Name (Bold)
+        event_lines.append(f"<b>{name}</b>")
+        # Venue Line
+        event_lines.append(f"📍 {venue_html}") # Use the generated venue_html
+        # Summary Line
+        event_lines.append(f"👉 {summary}")
+        # Vibes Line (Optional)
+        if vibes:
+            event_lines.append(f"✨ {vibes}")
+        # Date Line
+        event_lines.append(f"📅 {date}")
+
+        # --- Distance and Direction ---
+        # Only add distance if postcode and coords were provided AND distance exists
+        if "distance_km" in ev and postcode and user_lat is not None and user_lon is not None:
+            dist_km = ev["distance_km"]
+            arrow = "" # Initialize arrow
+
+            # Calculate direction arrow if user coords and event coords are valid
+            ev_lat_str = ev.get("latitude")
+            ev_lon_str = ev.get("longitude")
+            try:
+                # Ensure event coords are valid floats and not NaN
+                ev_lat = float(ev_lat_str) if ev_lat_str is not None else math.nan
+                ev_lon = float(ev_lon_str) if ev_lon_str is not None else math.nan
+                if not math.isnan(ev_lat) and not math.isnan(ev_lon):
+                    # Calculate bearing and get arrow
+                    bearing = calculate_bearing(user_lat, user_lon, ev_lat, ev_lon)
+                    arrow = bearing_to_arrow(bearing) + " " # Add space after arrow
+                else:
+                    arrow = "" # No arrow if event coords invalid
+            except (TypeError, ValueError, AttributeError):
+                # logger.warning(f"Could not parse event lat/lon for bearing: lat='{ev_lat_str}', lon='{ev_lon_str}' for event '{name}'")
+                arrow = "" # Default to no arrow if coords are bad
+
+            # Format distance string (meters or km)
+            dist_str = ""
+            try:
+                if dist_km < 0.1: # Show meters if < 100m
+                    dist_m = round(dist_km * 1000)
+                    dist_str = f"{dist_m}m"
+                elif dist_km < 10: # Show 1 decimal place if < 10km
+                    dist_str = f"{dist_km:.1f}km"
+                else: # Show no decimal places if >= 10km
+                    dist_str = f"{dist_km:.0f}km"
+            except (TypeError, ValueError):
+                dist_str = "Distance unknown" # Fallback
+
+            # Append the compass line with distance, arrow, and postcode
+            event_lines.append(f"🧭 <i>{dist_str} {arrow}from {postcode.upper()}</i>")
+
+        # Join lines for the current event with single newlines
+        lines.append("\n".join(event_lines))
+
+    # Join multiple events with double newline for separation
+    return "\n\n".join(lines)
+
+
+# ---------------------------------------------------------------------
+# Process Callbacks (MODIFIED - removed is_single_event_request)
+# ---------------------------------------------------------------------
 
 def process_callback_query(callback_query: dict):
     """Handles incoming callback queries from inline keyboard buttons."""
@@ -351,329 +634,502 @@ def process_callback_query(callback_query: dict):
         logger.error(f"Could not get chat_id or message_id from callback query {query_id}")
         return
 
-    # --- Handle specific callback data ---
+    # --- Handle Random Refresh ---
     if data == "load_random":
         logger.info(f"Processing 'load_random' callback from chat {chat_id}, msg {message_id}")
-        # Fetch a *new* random event
         new_events = fetch_random_events(days_ahead=7, limit=1)
-        if new_events:
-             # Re-define the keyboard (to keep it on the message after editing)
-            keyboard = {
-                "inline_keyboard": [
-                    [{"text": random.choice(RANDOM_EVENT_MESSAGES), "callback_data": "load_random"}]
-                ]
-            }
-            # Format the new event's text
-            new_message_text = format_events_message(events=[new_events[0]], time_period="a random event")
-            # Edit the original message
-            success = edit_telegram_message(chat_id, message_id, new_message_text, reply_markup=keyboard)
-            if not success:
-                 logger.error(f"Failed to edit message for 'load_random' callback. Chat: {chat_id}, Msg: {message_id}")
-                 # Optional: Send a temporary error message if editing fails
-                 # send_telegram_message(chat_id, "Sorry, couldn't update the event just now.")
-        else:
-            # No more events found, edit the message to inform the user
-            edit_telegram_message(chat_id, message_id, "Sorry, couldn't find another random event right now.")
 
-    # Add elif data == "other_button": blocks here for future buttons
+        if new_events:
+            new_event = new_events[0]
+            user_pc = None
+            lat, lon = None, None
+            postcode_valid_and_geocoded = False
+
+            # Attempt to get user location for distance
+            user_pc = get_user_postcode(chat_id)
+            if user_pc and is_valid_london_postcode(user_pc):
+                lat, lon = geocode_postcode_to_latlon(user_pc)
+                if lat is not None and lon is not None:
+                    postcode_valid_and_geocoded = True
+                    # Calculate and add distance if possible
+                    ev_lat_str = new_event.get("latitude")
+                    ev_lon_str = new_event.get("longitude")
+                    try:
+                        ev_lat = float(ev_lat_str) if ev_lat_str is not None else math.nan
+                        ev_lon = float(ev_lon_str) if ev_lon_str is not None else math.nan
+                        if not math.isnan(ev_lat) and not math.isnan(ev_lon):
+                            dist = haversine_distance(lat, lon, ev_lat, ev_lon)
+                            new_event["distance_km"] = dist # Add distance to the event dict
+                    except (ValueError, TypeError):
+                        logger.warning(f"Could not parse event lat/lon for random event distance: {new_event.get('event_id')}")
+
+            keyboard = {"inline_keyboard": [[{"text": "🔄🔄🔄", "callback_data": "load_random"}]]}
+
+            # Pass location info ONLY if it was successfully retrieved and event has distance calculated
+            if postcode_valid_and_geocoded and "distance_km" in new_event:
+                 new_message_text = format_events_message(
+                    events=[new_event],
+                    time_period="a random event",
+                    postcode=user_pc,
+                    user_lat=lat,
+                    user_lon=lon
+                    # is_single_event_request removed
+                )
+            else:
+                new_message_text = format_events_message(
+                    events=[new_event],
+                    time_period="a random event"
+                    # is_single_event_request removed
+                )
+            edit_telegram_message(chat_id, message_id, new_message_text, reply_markup=keyboard)
+        else:
+            edit_telegram_message(chat_id, message_id, "Sorry, couldn't find another random event right now.", reply_markup=None)
+
+    # --- Handle Local Refresh ---
+    elif data == "load_local":
+        logger.info(f"Processing 'load_local' callback from chat {chat_id}, msg {message_id}")
+        user_pc = get_user_postcode(chat_id)
+        if not user_pc:
+             edit_telegram_message(chat_id, message_id, "Please set your location first using /updatelocation.", reply_markup=None)
+             return
+        if not is_valid_london_postcode(user_pc):
+              edit_telegram_message(chat_id, message_id, f"Your stored postcode {user_pc} seems invalid. Please update it with /updatelocation.", reply_markup=None)
+              return
+        lat, lon = geocode_postcode_to_latlon(user_pc)
+        if lat is None or lon is None:
+             edit_telegram_message(chat_id, message_id, f"Could not find location for {user_pc}. Please update it with /updatelocation.", reply_markup=None)
+             return
+
+        today_str = datetime.datetime.utcnow().strftime("%Y-%m-%d")
+        future_date = datetime.datetime.utcnow() + datetime.timedelta(days=7)
+        future_str = future_date.strftime("%Y-%m-%d")
+        fetched_events = fetch_events(
+            date_from=today_str,
+            date_to=future_str,
+            user_lat=lat,
+            user_lon=lon,
+            overall_limit=10
+            )
+
+        if fetched_events:
+            new_event = random.choice(fetched_events)
+            keyboard = { "inline_keyboard": [ [{"text": "🔄🔄🔄", "callback_data": "load_local"}] ] }
+            new_message_text = format_events_message(
+                events=[new_event],
+                postcode=user_pc,
+                user_lat=lat,
+                user_lon=lon,
+                time_period="nearby"
+                # is_single_event_request removed
+            )
+            edit_telegram_message(chat_id, message_id, new_message_text, reply_markup=keyboard)
+        else:
+             edit_telegram_message(chat_id, message_id, f"Sorry, couldn't find any other local events near {user_pc} in the next 7 days.", reply_markup=None)
+
+    # --- Handle Today Refresh ---
+    elif data == "load_today":
+        logger.info(f"Processing 'load_today' callback from chat {chat_id}, msg {message_id}")
+        user_pc = get_user_postcode(chat_id)
+        if not user_pc or not is_valid_london_postcode(user_pc):
+             edit_telegram_message(chat_id, message_id, "Please set a valid London location first using /updatelocation.", reply_markup=None)
+             return
+        lat, lon = geocode_postcode_to_latlon(user_pc)
+        if lat is None or lon is None:
+             edit_telegram_message(chat_id, message_id, f"Could not find location for {user_pc}. Please update it.", reply_markup=None)
+             return
+
+        today_str = datetime.datetime.utcnow().strftime("%Y-%m-%d")
+        fetched_events = fetch_events(
+            date_from=today_str,
+            date_to=today_str,
+            user_lat=lat,
+            user_lon=lon,
+            overall_limit=10
+            )
+
+        if fetched_events:
+            new_event = random.choice(fetched_events)
+            keyboard = { "inline_keyboard": [ [{"text": "🔄🔄🔄", "callback_data": "load_today"}] ] }
+            new_message_text = format_events_message(
+                events=[new_event],
+                postcode=user_pc,
+                user_lat=lat,
+                user_lon=lon,
+                time_period="today"
+                # is_single_event_request removed
+            )
+            edit_telegram_message(chat_id, message_id, new_message_text, reply_markup=keyboard)
+        else:
+             edit_telegram_message(chat_id, message_id, f"Sorry, couldn't find any other events today near {user_pc}.", reply_markup=None)
+
+    # --- Handle Tomorrow Refresh ---
+    elif data == "load_tomorrow":
+        logger.info(f"Processing 'load_tomorrow' callback from chat {chat_id}, msg {message_id}")
+        user_pc = get_user_postcode(chat_id)
+        if not user_pc or not is_valid_london_postcode(user_pc):
+             edit_telegram_message(chat_id, message_id, "Please set a valid London location first using /updatelocation.", reply_markup=None)
+             return
+        lat, lon = geocode_postcode_to_latlon(user_pc)
+        if lat is None or lon is None:
+             edit_telegram_message(chat_id, message_id, f"Could not find location for {user_pc}. Please update it.", reply_markup=None)
+             return
+
+        tomorrow_date = datetime.datetime.utcnow() + datetime.timedelta(days=1)
+        tomorrow_str = tomorrow_date.strftime("%Y-%m-%d")
+        fetched_events = fetch_events(
+            date_from=tomorrow_str,
+            date_to=tomorrow_str,
+            user_lat=lat,
+            user_lon=lon,
+            overall_limit=10
+            )
+
+        if fetched_events:
+            new_event = random.choice(fetched_events)
+            keyboard = { "inline_keyboard": [ [{"text": "🔄🔄🔄", "callback_data": "load_tomorrow"}] ] }
+            new_message_text = format_events_message(
+                events=[new_event],
+                postcode=user_pc,
+                user_lat=lat,
+                user_lon=lon,
+                time_period="tomorrow"
+                # is_single_event_request removed
+            )
+            edit_telegram_message(chat_id, message_id, new_message_text, reply_markup=keyboard)
+        else:
+             edit_telegram_message(chat_id, message_id, f"Sorry, couldn't find any other events tomorrow near {user_pc}.", reply_markup=None)
 
     else:
         logger.warning(f"Received unhandled callback data: {data} from chat {chat_id}")
 
 
 # ---------------------------------------------------------------------
-# Format Messages
-# ---------------------------------------------------------------------
-
-def format_events_message(
-    events: ta.List[ta.Dict[str, ta.Any]],
-    time_period: str = "",
-    postcode: str = "",
-    user_lat: ta.Optional[float] = None, # Add user_lat
-    user_lon: ta.Optional[float] = None  # Add user_lon
-) -> str:
-    """
-    Format a list of events using rich HTML formatting. Includes distance and direction if available.
-    - time_period: e.g., "today", "tomorrow", "in the next 7 days"
-    - postcode: included in the header if provided
-    - user_lat, user_lon: User's coordinates needed for direction calculation.
-    """
-    if not events:
-        location_str = f"near {postcode}" if postcode else ""
-        return f"No events found {time_period} {location_str}.".strip()
-
-    lines = []
-    location_str = f"near {postcode}" if postcode else ""
-    # Adjust header logic slightly if needed based on presence of location info
-    header_parts = []
-    if len(events) > 1 : header_parts.append("Here are events")
-    if time_period: header_parts.append(time_period)
-    if location_str: header_parts.append(location_str)
-    if header_parts and len(events) > 1: # Only show header for multiple events
-        lines.append(" ".join(header_parts) + ":\n")
-
-
-    for ev in events:
-        name = (ev.get("pretty_event_name") or "").strip()
-        venue = (ev.get("pretty_venue_name") or "").strip()
-        date = (ev.get("pretty_date") or "").strip()
-        url = (ev.get("venue_url") or "").strip()
-        vibes = (ev.get("vibes") or "").strip()
-        summary = (ev.get("pretty_description") or "").strip()
-
-        if url:
-            venue_html = f'<a href="{url}">{venue}</a>'
-        else:
-            venue_html = venue
-
-        if vibes:
-            vibes_html = f"✨ {vibes}\n"
-        else:
-            vibes_html = ""
-
-        # Start building the main event line
-        line = f"<b>{name}</b>\n📍 <i>{venue_html}</i>\n👉 {summary}\n{vibes_html}📅 {date}"
-
-        # Check if distance information is available and postcode was provided
-        if "distance_km" in ev and postcode:
-            dist_km = ev["distance_km"]
-            arrow = "" # Initialize arrow
-
-            # Calculate direction arrow if user coords and event coords are valid
-            if user_lat is not None and user_lon is not None:
-                ev_lat_str = ev.get("latitude")
-                ev_lon_str = ev.get("longitude")
-                try:
-                    # Ensure event coords are valid floats
-                    ev_lat = float(ev_lat_str)
-                    ev_lon = float(ev_lon_str)
-                    if not math.isnan(ev_lat) and not math.isnan(ev_lon): # Check for NaN
-                        # Calculate bearing and get arrow
-                        bearing = calculate_bearing(user_lat, user_lon, ev_lat, ev_lon)
-                        arrow = bearing_to_arrow(bearing) + " " # Add space after arrow for readability
-                except (TypeError, ValueError, AttributeError): # Catch potential conversion errors
-                    logger.warning(f"Could not parse event lat/lon for bearing calculation: lat='{ev_lat_str}', lon='{ev_lon_str}' for event '{name}'")
-                    arrow = "" # Default to no arrow if coords are bad
-
-            # Format distance string (meters or km)
-            dist_str = ""
-            if dist_km < 1:
-                dist_m = round_sig(dist_km * 1000)
-                dist_str = f"{dist_m:.0f}m"
-            else:
-                dist_str = f"{dist_km:.1f}km" # Use km consistently
-
-            # Append the compass line with distance, arrow, and postcode
-            line += f"\n🧭 <i>{dist_str} {arrow}from {postcode.upper()}</i>"
-
-        lines.append(line)
-
-    # Join with double newline for separation between events
-    return "\n\n".join(lines)
-
-
-# ---------------------------------------------------------------------
-# Process Incoming Messages
+# Process Incoming Messages (MODIFIED - removed is_single_event_request)
 # ---------------------------------------------------------------------
 
 def process_message(msg: dict):
-    chat_id = str(msg.get('chat', {}).get('id', ''))
-    text_raw = (msg.get('text') or '').strip()
+    # Removed unused message_id assignment
+    chat_info = msg.get('chat', {})
+    chat_id = str(chat_info.get('id', ''))
+    chat_type = chat_info.get('type', '')
+    user_info = msg.get('from', {})
+    user_id = str(user_info.get('id', ''))
+    first_name = user_info.get('first_name', '')
+    last_name = user_info.get('last_name', '')
+    username = user_info.get('username', '')
 
-    if not chat_id:
+    text_raw = (msg.get('text') or '').strip()
+    text_lower = text_raw.lower()
+
+    if not chat_id or user_info.get('is_bot'):
         return
 
-    # Update message count
-    try:
-        resp = supabase.table("telegram_chats").select("chat_id, message_count").eq("chat_id", chat_id).single().execute()
-        if resp.data:
-            new_count = resp.data["message_count"] + 1
-            supabase.table("telegram_chats").update({"message_count": new_count}).eq("chat_id", chat_id).execute()
-        else:
-            supabase.table("telegram_chats").insert({"chat_id": chat_id, "message_count": 1}).execute()
-    except Exception as exc:
-        logger.error(f"Error updating message_count: {exc}")
+    if msg.get('edit_date'):
+        return
 
-    # Ensure user is subscribed
-    try:
-        if not supabase.table("telegram_subscribers").select("id").eq("chat_id", chat_id).execute().data:
-            supabase.table("telegram_subscribers").insert({
-                "chat_id": chat_id,
-                "subscribed_date": datetime.datetime.utcnow().isoformat()
-            }).execute()
-    except Exception as exc:
-        logger.error(f"Error adding subscriber: {exc}")
+    logger.info(
+        f"Processing message from chat {chat_id} (type: {chat_type}, user: {user_id} '{first_name}'): '{text_raw}'")
 
+    try:
+        supabase.rpc(
+            'upsert_telegram_chat',
+            {
+                'p_chat_id': chat_id,
+                'p_chat_type': chat_type,
+                'p_first_name': first_name,
+                'p_last_name': last_name,
+                'p_username': username
+            }
+        ).execute()
+
+        if chat_type == 'private':
+            supabase.table("telegram_subscribers").upsert(
+                {"chat_id": chat_id, "subscribed_date": datetime.datetime.utcnow().isoformat()},
+                on_conflict="chat_id"
+            ).execute()
+
+    except Exception as exc:
+        logger.error(f"Error updating chat/subscriber info for chat {chat_id}: {exc}", exc_info=True)
+
+    # Updated help text slightly
     help_text = (
         "Welcome to Niche London Events! 👋\n\n"
-        "Commands:\n"
-        "local - Your closest events 🧭\n"
-        "best - Our top picks  🏆\n"
-        "today - What's on today? 🔜\n"
-        "tomorrow - What's on tomorrow? 👣\n"
-        "random - I'm feeling lucky 🍀\n"
-        "subscribe - Weekly roundup 📬\n"
-        "unsubscribe - Stop already! 🫗\n"
-        "updatelocation - Update map pinhead 📍\n"
-        "Or send a valid UK postcode (e.g., E8 3PN) for local events!"
+        "I find unique and interesting events happening across London.\n\n"
+        "<b>Commands:</b>\n"
+        "/local - Show a nearby event (needs location set)\n"
+        "/today - Show an event happening today (needs location)\n"
+        "/tomorrow - Show an event happening tomorrow (needs location)\n"
+        "/random - Show a random event in the next week\n"
+        #"/best - Our top picks coming soon! 🏆\n"
+        "/updatelocation - Set/update your London postcode\n"
+        "/help - Show this message\n\n"
+        #"/subscribe and /unsubscribe manage the weekly roundup."
+        "Tip: You can also just send me a valid London postcode (e.g., E8 3PN) to set your location!"
     )
 
-    text_lower = text_raw.lower()
+    help_text = (
+        "Welcome to <i>Niche London</i>! 👋\n\n"
+        "I find unique and interesting events happening across London.\n\n"
+        "<b>Commands:</b>:\n"
+        "/local - Your closest events 🧭\n"
+        "/best - Our top picks  🏆\n"
+        "/today - What's on today? 🔜\n"
+        "/tomorrow - What's on tomorrow? 👣\n"
+        "/random - I'm feeling lucky 🍀\n"
+        "/subscribe - Weekly roundup 📬\n"
+        "/unsubscribe - Stop already! 🫗\n"
+        "/updatelocation - Update map pinhead 📍\n"
+        "Or, send a valid UK postcode (e.g., <i>E8 3PN</i>) for local events!"
+    )
 
     if text_lower in ["/start", "/help", "help", "hello", "hi", "?"]:
         awaiting_location_update[chat_id] = False
         send_telegram_message(chat_id, help_text)
 
-    elif text_lower in ["/updatelocation"]:
+    elif text_lower == "/updatelocation":
         awaiting_location_update[chat_id] = True
-        send_telegram_message(chat_id, "Please send me a valid UK postcode now.")
+        send_telegram_message(chat_id, "OK. Please send me your London postcode (e.g., SW1A 0AA).")
 
-    elif text_lower in ["/subscribe"]:
-        awaiting_location_update[chat_id] = False
-        send_telegram_message(chat_id, "You're now subscribed to weekly updates.")
+    elif text_lower == "/subscribe":
+        if chat_type == 'private':
+            awaiting_location_update[chat_id] = False
+            send_telegram_message(chat_id, "You're set to receive the weekly roundup!")
+        else:
+            send_telegram_message(chat_id, "Subscription commands only work in private chat with me.")
 
-    elif text_lower in ["/unsubscribe"]:
-        awaiting_location_update[chat_id] = False
-        try:
-            supabase.table("telegram_subscribers").delete().eq("chat_id", chat_id).execute()
-            send_telegram_message(chat_id, "You've been unsubscribed.")
-        except Exception as exc:
-            logger.error(f"Error unsubscribing: {exc}")
-            send_telegram_message(chat_id, "Error unsubscribing. Try again later.")
+    elif text_lower == "/unsubscribe":
+        if chat_type == 'private':
+            awaiting_location_update[chat_id] = False
+            try:
+                supabase.table("telegram_subscribers").delete().eq("chat_id", chat_id).execute()
+                send_telegram_message(chat_id, "You've been unsubscribed from the weekly roundup.")
+            except Exception as exc:
+                logger.error(f"Error unsubscribing chat {chat_id}: {exc}", exc_info=True)
+                send_telegram_message(chat_id,
+                                      "Sorry, there was an error trying to unsubscribe. Please try again later.")
+        else:
+            send_telegram_message(chat_id, "Subscription commands only work in private chat with me.")
 
-    elif text_lower in ["/local"]:
+    elif text_lower == "/local":
         awaiting_location_update[chat_id] = False
         user_pc = get_user_postcode(chat_id)
         if not user_pc:
-            send_telegram_message(chat_id, "No location set. Use /updatelocation or send a postcode.")
-            return
-        if not is_valid_london_postcode(postcode=user_pc):
-            send_telegram_message(chat_id, f"Postcode must be valid and in London. Try /updatelocation.")
-            return
-        lat, lon = geocode_postcode_to_latlon(user_pc)
-        if lat is None or lon is None:
-            send_telegram_message(chat_id, f"Could not geocode '{user_pc}'. Try /updatelocation.")
-            return
-        today_str = datetime.datetime.utcnow().strftime("%Y-%m-%d")
-        future_str = (datetime.datetime.utcnow() + datetime.timedelta(days=7)).strftime("%Y-%m-%d")
-        events = fetch_events(date_from=today_str, date_to=future_str, user_lat=lat, user_lon=lon)
-        if events:
-            send_event_messages(
-                chat_id=chat_id,
-                events=events,
-                postcode=user_pc,
-                user_lat=lat,
-                user_lon=lon
-            )
-        else:
-            send_telegram_message(chat_id, "No local events found in the next 7 days.")
-
-    elif text_lower in ["/best"]:
-        awaiting_location_update[chat_id] = False
-        events = fetch_random_events(days_ahead=7, limit=5)
-        if events:
-            send_event_messages(
-                chat_id=chat_id,
-                events=events
-            )
-        else:
-            send_telegram_message(chat_id, "No events found.")
-
-    elif text_lower in ["/today"]:
-        awaiting_location_update[chat_id] = False
-        user_pc = get_user_postcode(chat_id)
-        if not user_pc:
-            send_telegram_message(chat_id, "No location set. Use /updatelocation for today’s events.")
+            send_telegram_message(chat_id,
+                                  "I need your location first! Use /updatelocation or send me a London postcode.")
             return
         if not is_valid_london_postcode(user_pc):
-            send_telegram_message(chat_id, f"Postcode must be valid and in London. Try /updatelocation.")
+            send_telegram_message(chat_id,
+                                  f"Your stored postcode '{user_pc}' doesn't look like a valid London postcode. Please update it using /updatelocation.")
             return
         lat, lon = geocode_postcode_to_latlon(user_pc)
         if lat is None or lon is None:
-            send_telegram_message(chat_id, f"Could not geocode '{user_pc}'. Try /updatelocation.")
+            send_telegram_message(chat_id,
+                                  f"Sorry, I couldn't find coordinates for '{user_pc}'. Try updating your location with /updatelocation using a different postcode.")
             return
+
         today_str = datetime.datetime.utcnow().strftime("%Y-%m-%d")
-        events = fetch_events(date_from=today_str, date_to=today_str, user_lat=lat, user_lon=lon)
+        future_date = datetime.datetime.utcnow() + datetime.timedelta(days=7)
+        future_str = future_date.strftime("%Y-%m-%d")
+
+        events = fetch_events(
+            date_from=today_str,
+            date_to=future_str,
+            user_lat=lat,
+            user_lon=lon,
+            overall_limit=1
+        )
+
         if events:
-            send_event_messages(
-                chat_id=chat_id,
-                events=events,
+            event = events[0]
+            keyboard = {"inline_keyboard": [[{"text": "🔄🔄🔄", "callback_data": "load_local"}]]}
+            message_text = format_events_message(
+                events=[event],
                 postcode=user_pc,
                 user_lat=lat,
-                user_lon=lon
+                user_lon=lon,
+                time_period="nearby"
+                # is_single_event_request removed
             )
-        else:
-            send_telegram_message(chat_id, "No events found today.")
-
-    elif text_lower in ["/tomorrow"]:
-        awaiting_location_update[chat_id] = False
-        user_pc = get_user_postcode(chat_id)
-        if not user_pc:
-            send_telegram_message(chat_id, "No location set. Use /updatelocation for tomorrow’s events.")
-            return
-        if not is_valid_london_postcode(user_pc):
-            send_telegram_message(chat_id, f"Postcode must be valid and in London. Try /updatelocation.")
-            return
-        lat, lon = geocode_postcode_to_latlon(user_pc)
-        if lat is None or lon is None:
-            send_telegram_message(chat_id, f"Could not geocode '{user_pc}'. Try /updatelocation.")
-            return
-        tomorrow = (datetime.datetime.utcnow() + datetime.timedelta(days=1)).strftime("%Y-%m-%d")
-        events = fetch_events(date_from=tomorrow, date_to=tomorrow, user_lat=lat, user_lon=lon)
-        if events:
-            send_event_messages(
-                chat_id=chat_id,
-                events=events,
-                postcode=user_pc,
-                user_lat=lat,
-                user_lon=lon
-            )
-        else:
-            send_telegram_message(chat_id, "No events found tomorrow.")
-
-    elif text_lower in ["/random"]:
-        awaiting_location_update[chat_id] = False
-        events = fetch_random_events(days_ahead=7, limit=1)
-        if events:
-            keyboard = {
-                "inline_keyboard": [
-                    [{"text": random.choice(RANDOM_EVENT_MESSAGES), "callback_data": "load_random"}]
-                ]
-            }
-            message_text = format_events_message(events=[events[0]], time_period="a random event")
             send_telegram_message(chat_id, message_text, reply_markup=keyboard)
         else:
-            send_telegram_message(chat_id, "No random events found.")
+            send_telegram_message(chat_id, f"Couldn't find any events near {user_pc.upper()} in the next 7 days.")
+
+    elif text_lower == "/today":
+        awaiting_location_update[chat_id] = False
+        user_pc = get_user_postcode(chat_id)
+        if not user_pc or not is_valid_london_postcode(user_pc):
+            send_telegram_message(chat_id, "I need your valid London location for today's events! Use /updatelocation.")
+            return
+        lat, lon = geocode_postcode_to_latlon(user_pc)
+        if lat is None or lon is None:
+            send_telegram_message(chat_id,
+                                  f"Sorry, couldn't find coordinates for '{user_pc}'. Try updating your location.")
+            return
+
+        today_str = datetime.datetime.utcnow().strftime("%Y-%m-%d")
+        events = fetch_events(
+            date_from=today_str,
+            date_to=today_str,
+            user_lat=lat,
+            user_lon=lon,
+            overall_limit=1
+        )
+
+        if events:
+            event = events[0]
+            keyboard = {"inline_keyboard": [[{"text": "🔄🔄🔄", "callback_data": "load_today"}]]}
+            message_text = format_events_message(
+                events=[event],
+                postcode=user_pc,
+                user_lat=lat,
+                user_lon=lon,
+                time_period="today"
+                # is_single_event_request removed
+            )
+            send_telegram_message(chat_id, message_text, reply_markup=keyboard)
+        else:
+            send_telegram_message(chat_id, f"Couldn't find any events today near {user_pc.upper()}.")
+
+    elif text_lower == "/tomorrow":
+        awaiting_location_update[chat_id] = False
+        user_pc = get_user_postcode(chat_id)
+        if not user_pc or not is_valid_london_postcode(user_pc):
+            send_telegram_message(chat_id,
+                                  "I need your valid London location for tomorrow's events! Use /updatelocation.")
+            return
+        lat, lon = geocode_postcode_to_latlon(user_pc)
+        if lat is None or lon is None:
+            send_telegram_message(chat_id,
+                                  f"Sorry, couldn't find coordinates for '{user_pc}'. Try updating your location.")
+            return
+
+        tomorrow_date = datetime.datetime.utcnow() + datetime.timedelta(days=1)
+        tomorrow_str = tomorrow_date.strftime("%Y-%m-%d")
+        events = fetch_events(
+            date_from=tomorrow_str,
+            date_to=tomorrow_str,
+            user_lat=lat,
+            user_lon=lon,
+            overall_limit=1
+        )
+
+        if events:
+            event = events[0]
+            keyboard = {"inline_keyboard": [[{"text": "🔄🔄🔄", "callback_data": "load_tomorrow"}]]}
+            message_text = format_events_message(
+                events=[event],
+                postcode=user_pc,
+                user_lat=lat,
+                user_lon=lon,
+                time_period="tomorrow"
+                # is_single_event_request removed
+            )
+            send_telegram_message(chat_id, message_text, reply_markup=keyboard)
+        else:
+            send_telegram_message(chat_id, f"Couldn't find any events tomorrow near {user_pc.upper()}.")
+
+    elif text_lower == "/random":
+        awaiting_location_update[chat_id] = False
+        events = fetch_random_events(days_ahead=7, limit=1)
+
+        if events:
+            event = events[0]
+            user_pc = None
+            lat, lon = None, None
+            postcode_valid_and_geocoded = False
+
+            # Attempt to get user location for distance
+            user_pc = get_user_postcode(chat_id)
+            if user_pc and is_valid_london_postcode(user_pc):
+                lat, lon = geocode_postcode_to_latlon(user_pc)
+                if lat is not None and lon is not None:
+                    postcode_valid_and_geocoded = True
+                    # Calculate and add distance if possible
+                    ev_lat_str = event.get("latitude")
+                    ev_lon_str = event.get("longitude")
+                    try:
+                        ev_lat = float(ev_lat_str) if ev_lat_str is not None else math.nan
+                        ev_lon = float(ev_lon_str) if ev_lon_str is not None else math.nan
+                        if not math.isnan(ev_lat) and not math.isnan(ev_lon):
+                            dist = haversine_distance(lat, lon, ev_lat, ev_lon)
+                            event["distance_km"] = dist # Add distance to the event dict
+                    except (ValueError, TypeError):
+                        logger.warning(f"Could not parse event lat/lon for random event distance: {event.get('event_id')}")
+
+            keyboard = {"inline_keyboard": [[{"text": "🔄🔄🔄", "callback_data": "load_random"}]]}
+
+            # Pass location info ONLY if it was successfully retrieved and event has distance calculated
+            if postcode_valid_and_geocoded and "distance_km" in event:
+                 message_text = format_events_message(
+                    events=[event],
+                    time_period="a random event",
+                    postcode=user_pc,
+                    user_lat=lat,
+                    user_lon=lon
+                    # is_single_event_request removed
+                )
+            else:
+                 message_text = format_events_message(
+                    events=[event],
+                    time_period="a random event"
+                    # is_single_event_request removed
+                )
+            send_telegram_message(chat_id, message_text, reply_markup=keyboard)
+        else:
+            send_telegram_message(chat_id, "Sorry, couldn't find any random events right now.")
 
     elif is_valid_london_postcode(text_raw.upper()):
+        postcode_norm = text_raw.upper()
         if awaiting_location_update.get(chat_id, False):
-            set_user_postcode(chat_id, text_raw.upper())
+            lat, lon = geocode_postcode_to_latlon(postcode_norm)
+            if lat is not None and lon is not None:
+                # Use the fixed set_user_postcode which returns True/False
+                if set_user_postcode(chat_id, postcode_norm):
+                    # Success message is sent ONLY if set_user_postcode returns True
+                    send_telegram_message(chat_id, f"✅ Location updated to {postcode_norm}!")
+                else:
+                    send_telegram_message(chat_id, "⚠️ There was an error saving your postcode. Please try again.")
+            else:
+                send_telegram_message(chat_id,
+                                      f"⚠️ Couldn't find coordinates for {postcode_norm}. Please try a different London postcode.")
+            # Reset flag regardless of success/failure
             awaiting_location_update[chat_id] = False
-            send_telegram_message(chat_id, f"Your location is now {text_raw.upper()}!")
         else:
-            lat, lon = geocode_postcode_to_latlon(text_raw.upper())
+            # Direct postcode search logic (unchanged from previous fix state)
+            lat, lon = geocode_postcode_to_latlon(postcode_norm)
             if not lat or not lon:
-                send_telegram_message(chat_id, "Couldn’t geocode that postcode. Try again.")
+                send_telegram_message(chat_id,
+                                      "Sorry, I couldn’t find coordinates for that postcode. Please try again.")
                 return
+            send_telegram_message(chat_id, f"OK, looking for events near {postcode_norm}...")
             today_str = datetime.datetime.utcnow().strftime("%Y-%m-%d")
-            future_str = (datetime.datetime.utcnow() + datetime.timedelta(days=7)).strftime("%Y-%m-%d")
-            events = fetch_events(date_from=today_str, date_to=future_str, user_lat=lat, user_lon=lon)
+            future_date = datetime.datetime.utcnow() + datetime.timedelta(days=7)
+            future_str = future_date.strftime("%Y-%m-%d")
+
+            events = fetch_events(
+                date_from=today_str,
+                date_to=future_str,
+                user_lat=lat,
+                user_lon=lon
+            )
             if events:
                 send_event_messages(
                     chat_id=chat_id,
                     events=events,
-                    postcode=text_raw.upper(),
+                    postcode=postcode_norm,
                     user_lat=lat,
                     user_lon=lon
                 )
             else:
-                send_telegram_message(chat_id, "No local events found in the next 7 days.")
+                send_telegram_message(chat_id, f"Couldn't find any events near {postcode_norm} in the next 7 days.")
 
     else:
-        send_telegram_message(chat_id, "Unrecognized command or invalid postcode. Try /help.")
+        if not awaiting_location_update.get(chat_id, False):
+            send_telegram_message(chat_id, "Sorry, I didn't understand that. Try /help to see available commands.")
+
 
 # ---------------------------------------------------------------------
-# Main Loop
+# Main Loop (Keep as is)
 # ---------------------------------------------------------------------
 
 def main():
@@ -707,27 +1163,34 @@ def main():
                 except Exception as e:
                     logger.error(f"Error processing message: {e}", exc_info=True)
                     # Optional: Notify user of error?
-                    # chat_id = message.get('chat', {}).get('id')
-                    # if chat_id:
-                    #    send_telegram_message(str(chat_id), "Sorry, something went wrong processing your request.")
+                    chat_id = message.get('chat', {}).get('id')
+                    if chat_id:
+                       try:
+                           send_telegram_message(str(chat_id), "Sorry, something went wrong processing your request.")
+                       except Exception as notify_e:
+                            logger.error(f"Failed to send error notification to {chat_id}: {notify_e}")
 
         # --- Saturday Broadcast ---
         now_utc = datetime.datetime.utcnow()
-        # Check if it's Saturday (5) and 9 AM UTC and if we haven't already run it this hour
-        # (Simple check to prevent multiple runs if loop is fast)
         current_hour_key = f"{now_utc.date()}-{now_utc.hour}"
+        # Use a simple attribute on the main function object for state
         if not hasattr(main, 'last_broadcast_hour') or main.last_broadcast_hour != current_hour_key:
+            # Check if it's Saturday (weekday 5) and 9 AM UTC
             if now_utc.weekday() == 5 and now_utc.hour == 9:
-                 logger.info("Saturday 9 AM UTC: Broadcasting events.")
+                 logger.info(f"Saturday 9 AM UTC detected ({now_utc}): Triggering broadcast.")
                  try:
                      broadcast_newsletter()
-                     main.last_broadcast_hour = current_hour_key # Mark as run for this hour
+                     # Mark as run for this hour ONLY on success
+                     main.last_broadcast_hour = current_hour_key
                  except Exception as e:
                      logger.error(f"Error during broadcast: {e}", exc_info=True)
-                 # Sleep longer after broadcast attempt to avoid immediate re-check if it failed
-                 time.sleep(60) # Sleep for a minute after check/run
+            # Update last checked hour regardless of broadcast attempt,
+            # but only update 'last_broadcast_hour' on successful run.
+            # A different variable could track last *check* if needed.
+            # For simplicity, this check runs every loop iteration near 9 AM Saturday.
 
-        time.sleep(1) # Reduced sleep time for better responsiveness, adjust as needed
+        # Main loop sleep
+        time.sleep(1)
 
 
 if __name__ == "__main__":
