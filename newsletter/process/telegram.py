@@ -402,23 +402,27 @@ def format_events_message(
 def create_event_keyboard(
     event: ta.Dict[str, ta.Any],
     refresh_callback_data: str,
-    can_go_back: bool # New parameter
+    can_go_back: bool
     ) -> ta.Optional[ta.Dict[str, ta.Any]]:
-    """Creates the inline keyboard with Back, Forward, Refresh, and Map buttons."""
+    """Creates the inline keyboard with emoji-only buttons on a single row."""
+
+    button_row: ta.List[ta.Dict[str, str]] = [] # All buttons go in this list
 
     # --- Define Buttons ---
-    back_button: ta.Dict[str, str] = {"text": "⏪ Back", "callback_data": "show_previous"}
+
+    # Back Button (Conditional)
+    if can_go_back:
+        back_button: ta.Dict[str, str] = {"text": "⏪", "callback_data": "show_previous"}
+        button_row.append(back_button)
+
+    # Forward Button
     forward_text: str = format_event_for_forwarding(event)
-    # switch_inline_query cannot be empty
-    forward_button: ta.Dict[str, str] = {"text": "📤 Forward", "switch_inline_query": forward_text if forward_text else "Check out this event!"}
-    refresh_button: ta.Dict[str, str] = {"text": "🔄 Refresh", "callback_data": refresh_callback_data} # Simpler text
+    forward_button: ta.Dict[str, str] = {"text": "📤", "switch_inline_query": forward_text if forward_text else "Check out this event!"}
+    button_row.append(forward_button)
 
-    button_row1: ta.List[ta.Dict[str, str]] = []
-    if can_go_back: # Only add back button if history allows
-        button_row1.append(back_button)
-    button_row1.append(forward_button) # Always add forward button
-
-    button_row2: ta.List[ta.Dict[str, str]] = [refresh_button]
+    # Refresh Button
+    refresh_button: ta.Dict[str, str] = {"text": "🔄", "callback_data": refresh_callback_data}
+    button_row.append(refresh_button)
 
     # Optional Map Button
     venue_name: ta.Optional[str] = event.get("pretty_venue_name")
@@ -427,16 +431,15 @@ def create_event_keyboard(
         try:
             search_query: str = f"{venue_name}, {venue_postcode}"
             maps_url: str = f"https://maps.google.com/?q={urllib.parse.quote_plus(search_query)}"
-            map_button: ta.Dict[str, str] = {"text": "📍 Map", "url": maps_url}
-            button_row2.append(map_button)
+            map_button: ta.Dict[str, str] = {"text": "📍", "url": maps_url}
+            button_row.append(map_button)
         except Exception as e: logger.error(f"Error creating map link: {e}")
 
     # --- Construct Keyboard ---
-    keyboard_layout: ta.List[ta.List[ta.Dict[str, str]]] = []
-    if button_row1: keyboard_layout.append(button_row1)
-    if button_row2: keyboard_layout.append(button_row2)
-
-    return {"inline_keyboard": keyboard_layout} if keyboard_layout else None
+    if button_row: # Only return keyboard if there are buttons
+        return {"inline_keyboard": [button_row]} # Single list = single row
+    else:
+        return None
 
 # --- Location Handling Helper ---
 
@@ -555,36 +558,44 @@ def handle_single_event_command(chat_id: str, command: str) -> None:
 
 def handle_refresh_callback(chat_id: str, message_id: int, callback_data: str) -> None:
     """Handles all refresh callback queries (load_...). Updates history."""
-    # ... (keep setup: fetch_params, user location checks etc) ...
+    # --- Initial Setup ---
     fetch_params: ta.Dict[str, ta.Any] = {}
     user_pc: ta.Optional[str] = None
     lat: ta.Optional[float] = None
     lon: ta.Optional[float] = None
-    fetch_limit: int = DEFAULT_EVENT_FETCH_LIMIT
+    # Fetch more events than needed to increase chance of finding a different one
+    fetch_limit: int = DEFAULT_EVENT_FETCH_LIMIT # Assumes constant is defined
     is_location_based: bool = callback_data in ["load_local", "load_today", "load_tomorrow"]
     is_random: bool = callback_data == "load_random"
-    is_best: bool = callback_data == "load_best"
+    is_best: bool = callback_data == "load_best" # Treated like random
     time_period_context: str = ""
     no_event_context: str = ""
     event_to_show: ta.Optional[ta.Dict[str, ta.Any]] = None # The event we'll display
+    fetched_events: ta.List[ta.Dict[str, ta.Any]] = [] # Initialize
 
+    # --- Get Location if Needed ---
     if is_location_based:
-        user_pc, lat, lon = get_user_location(chat_id)
-        if not user_pc: edit_telegram_message(chat_id, message_id, LOCATION_PROMPT_MESSAGE, reply_markup=None); return
-        if lat is None or lon is None: edit_telegram_message(chat_id, message_id, GEOCODE_ERROR_MESSAGE.format(postcode=user_pc), reply_markup=None); return
+        user_pc, lat, lon = get_user_location(chat_id) # Assumes this helper exists
+        if not user_pc:
+            # Cannot refresh location-based without location
+            edit_telegram_message(chat_id, message_id, LOCATION_PROMPT_MESSAGE, reply_markup=None) # Assumes constant exists
+            return
+        if lat is None or lon is None:
+            # Stored postcode exists but geocoding failed
+            edit_telegram_message(chat_id, message_id, GEOCODE_ERROR_MESSAGE.format(postcode=user_pc), reply_markup=None) # Assumes constant exists
+            return
         fetch_params.update({"user_lat": lat, "user_lon": lon})
         no_event_context = f"near {user_pc.upper()}"
 
+    # --- Determine Fetch Dates/Context ---
     today_dt: datetime.datetime = datetime.datetime.utcnow()
     today_str: str = today_dt.strftime("%Y-%m-%d")
 
-    # --- Determine fetch context ---
     if callback_data == "load_local":
         fetch_params["date_from"] = today_str
         fetch_params["date_to"] = (today_dt + datetime.timedelta(days=7)).strftime("%Y-%m-%d")
         time_period_context = "nearby"
         no_event_context = f"in the next 7 days {no_event_context}".strip()
-    # ... (elif for load_today, load_tomorrow - same as before) ...
     elif callback_data == "load_today":
         fetch_params["date_from"] = today_str
         fetch_params["date_to"] = today_str
@@ -597,69 +608,96 @@ def handle_refresh_callback(chat_id: str, message_id: int, callback_data: str) -
         fetch_params["date_to"] = tomorrow_str
         time_period_context = "tomorrow"
         no_event_context = f"tomorrow {no_event_context}".strip()
-
+    # Note: No date params needed for random/best fetch path below
 
     # --- Fetch event(s) ---
     if is_random or is_best:
-        fetched_events = fetch_random_events(days_ahead=DEFAULT_RANDOM_DAYS_AHEAD, limit=1)
+        # Fetch 1 new random/best event
+        fetched_events = fetch_random_events(days_ahead=DEFAULT_RANDOM_DAYS_AHEAD, limit=1) # Assumes this helper exists
         time_period_context = "a random event" if is_random else "a top pick"
         no_event_context = "randomly" if is_random else "as a top pick"
-        if fetched_events: event_to_show = fetched_events[0]
     elif is_location_based:
-        fetched_events = fetch_events(overall_limit=fetch_limit, **fetch_params)
-        if fetched_events:
-             # Avoid showing the same event immediately if possible
-             history_key = (chat_id, message_id)
-             current_history = message_event_history.get(history_key)
-             current_event_id = current_history[-1].get("event_id") if current_history else None
-
-             possible_events = [ev for ev in fetched_events if ev.get("event_id") != current_event_id]
-             if possible_events:
-                 event_to_show = random.choice(possible_events)
-             elif fetched_events: # Fallback if only the current event was found
-                  event_to_show = fetched_events[0]
-    else: # Should not happen if callback_data starts with load_
+        # Fetch multiple potential events based on location/date
+        fetched_events = fetch_events(overall_limit=fetch_limit, **fetch_params) # Assumes this helper exists
+    else:
          logger.error(f"Unhandled callback type in refresh handler: {callback_data}")
          return
 
+    # --- Select Event to Show ---
+    if fetched_events:
+        history_key = (chat_id, message_id)
+        current_history: ta.Optional[deque[ta.Dict[str, ta.Any]]] = message_event_history.get(history_key)
+        current_event_id: ta.Optional[str] = None
+        if current_history:
+            try:
+                # Get ID of the event currently displayed (last in deque)
+                current_event_id = current_history[-1].get("event_id")
+            except IndexError:
+                logger.warning(f"History deque empty for {history_key} unexpectedly.")
+
+        # Try to find an event different from the current one
+        possible_events: ta.List[ta.Dict[str, ta.Any]] = [ev for ev in fetched_events if ev.get("event_id") != current_event_id]
+
+        if possible_events:
+            # Choose randomly from the different events found
+            event_to_show = random.choice(possible_events)
+            logger.info(f"Refresh for msg {message_id}: Found {len(possible_events)} different event(s), chose {event_to_show.get('event_id')}")
+        elif fetched_events:
+            # Only the same event(s) were found, or only one total was fetched
+            event_to_show = fetched_events[0] # Show the first one (likely same as current)
+            logger.info(f"Refresh for msg {message_id}: No different events found, re-showing {event_to_show.get('event_id')}")
+        # else: fetched_events was empty, event_to_show remains None
 
     # --- Update message or show 'no events' ---
     if event_to_show:
-        # Get user location again for distance calc if needed (esp for random/best)
-        user_pc_refresh, lat_refresh, lon_refresh = get_user_location(chat_id)
+        # Get user location again for distance calculation if needed (user might have updated it)
+        # Use the location determined earlier if location-based, or try fetching if random/best
+        user_pc_refresh, lat_refresh, lon_refresh = (user_pc, lat, lon) if is_location_based else get_user_location(chat_id)
+
         if lat_refresh is not None and lon_refresh is not None:
-            try: # Add distance if possible
+            try: # Add/update distance if possible
                 ev_lat = float(event_to_show.get("latitude", math.nan))
                 ev_lon = float(event_to_show.get("longitude", math.nan))
                 if not math.isnan(ev_lat) and not math.isnan(ev_lon):
-                    event_to_show["distance_km"] = haversine_distance(lat_refresh, lon_refresh, ev_lat, ev_lon)
-            except (ValueError, TypeError): pass
+                    # Ensure distance is calculated using the potentially updated user location
+                    event_to_show["distance_km"] = haversine_distance(lat_refresh, lon_refresh, ev_lat, ev_lon) # Assumes helper exists
+            except (ValueError, TypeError): pass # Ignore distance calc errors
 
         # --- Update History ---
         history_key = (chat_id, message_id)
         if history_key not in message_event_history:
-             message_event_history[history_key] = deque(maxlen=HISTORY_SIZE)
-        message_event_history[history_key].append(event_to_show)
-        # Store context type if missing or update (should normally exist)
+             # Initialize history if it somehow doesn't exist (e.g., after restart)
+             message_event_history[history_key] = deque(maxlen=HISTORY_SIZE) # Assumes constant exists
+             logger.warning(f"Initialized missing history for msg {message_id} during refresh.")
+        # Append a copy to avoid modifying the same dict object if it's reused
+        message_event_history[history_key].append(event_to_show.copy())
+        # Ensure context type is stored (important for back button consistency)
         if history_key not in message_context_type:
-             message_context_type[history_key] = callback_data
-        logger.info(f"Appended history for msg {message_id} in chat {chat_id}. New len: {len(message_event_history[history_key])}")
+             message_context_type[history_key] = callback_data # Store the *current* refresh type
+             logger.warning(f"Initialized missing context '{callback_data}' for msg {message_id} during refresh.")
 
+        current_history_len = len(message_event_history[history_key])
+        logger.info(f"Appended history for msg {message_id}. New len: {current_history_len}")
 
         # --- Format and Edit ---
-        can_go_back: bool = len(message_event_history[history_key]) > 1
-        keyboard = create_event_keyboard(event_to_show, callback_data, can_go_back=can_go_back)
-        message_text = format_events_message(
+        can_go_back: bool = current_history_len > 1
+        keyboard: ta.Optional[ta.Dict[str, ta.Any]] = create_event_keyboard(event_to_show, callback_data, can_go_back=can_go_back)
+        message_text: str = format_events_message( # Assumes this helper exists
             events=[event_to_show],
-            postcode=user_pc_refresh, user_lat=lat_refresh, user_lon=lon_refresh,
+            postcode=user_pc_refresh, # Use the latest postcode fetched
+            user_lat=lat_refresh,
+            user_lon=lon_refresh,
             time_period=time_period_context
         )
-        edit_telegram_message(chat_id, message_id, message_text, reply_markup=keyboard)
+        logger.info(f"Attempting to edit msg {message_id} for refresh callback {callback_data}")
+        if not edit_telegram_message(chat_id, message_id, message_text, reply_markup=keyboard): # Assumes this helper exists
+            logger.error(f"Edit failed for refresh callback {callback_data} on msg {message_id}")
+            # Potential state inconsistency if edit fails after history update
     else:
-        # No *new* event found
-        edit_telegram_message(chat_id, message_id, NO_EVENTS_MESSAGE.format(context=no_event_context, postcode=user_pc.upper() if user_pc else ""), reply_markup=None)
-
-
+        # No event found at all by the fetch
+        logger.info(f"No events found for refresh callback {callback_data} on msg {message_id}")
+        # Edit message to indicate no events found
+        edit_telegram_message(chat_id, message_id, NO_EVENTS_MESSAGE.format(context=no_event_context, postcode=user_pc.upper() if user_pc else ""), reply_markup=None) # Assumes constant exists
 
 
 # --- Main Message Processing Logic ---
