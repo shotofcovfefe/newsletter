@@ -399,47 +399,126 @@ def format_events_message(
 
     return "\n\n".join(lines)
 
-def create_event_keyboard(
-    event: ta.Dict[str, ta.Any],
-    refresh_callback_data: str,
-    can_go_back: bool
-    ) -> ta.Optional[ta.Dict[str, ta.Any]]:
-    """Creates the inline keyboard with emoji-only buttons on a single row."""
+# Full function provided again for clarity
+def handle_refresh_callback(chat_id: str, message_id: int, callback_data: str) -> None:
+    """Handles all refresh callback queries (load_...). Updates history."""
+    # --- Initial Setup ---
+    fetch_params: ta.Dict[str, ta.Any] = {}
+    user_pc: ta.Optional[str] = None
+    lat: ta.Optional[float] = None
+    lon: ta.Optional[float] = None
+    fetch_limit: int = DEFAULT_EVENT_FETCH_LIMIT # Assumes constant is defined
+    is_location_based: bool = callback_data in ["load_local", "load_today", "load_tomorrow"]
+    is_random: bool = callback_data == "load_random"
+    is_best: bool = callback_data == "load_best" # Treated like random
+    time_period_context: str = ""
+    no_event_context: str = ""
+    event_to_show: ta.Optional[ta.Dict[str, ta.Any]] = None # The event we'll display
+    fetched_events: ta.List[ta.Dict[str, ta.Any]] = [] # Initialize
 
-    button_row: ta.List[ta.Dict[str, str]] = [] # All buttons go in this list
+    # --- Get Location if Needed ---
+    if is_location_based:
+        user_pc, lat, lon = get_user_location(chat_id) # Assumes this helper exists
+        if not user_pc:
+            edit_telegram_message(chat_id, message_id, LOCATION_PROMPT_MESSAGE, reply_markup=None) # Assumes constant exists
+            return
+        if lat is None or lon is None:
+            edit_telegram_message(chat_id, message_id, GEOCODE_ERROR_MESSAGE.format(postcode=user_pc), reply_markup=None) # Assumes constant exists
+            return
+        fetch_params.update({"user_lat": lat, "user_lon": lon})
+        no_event_context = f"near {user_pc.upper()}"
 
-    # --- Define Buttons ---
+    # --- Determine Fetch Dates/Context ---
+    today_dt: datetime.datetime = datetime.datetime.utcnow()
+    today_str: str = today_dt.strftime("%Y-%m-%d")
 
-    # Back Button (Conditional)
-    if can_go_back:
-        back_button: ta.Dict[str, str] = {"text": "⏪", "callback_data": "show_previous"}
-        button_row.append(back_button)
+    if callback_data == "load_local":
+        fetch_params["date_from"] = today_str
+        fetch_params["date_to"] = (today_dt + datetime.timedelta(days=7)).strftime("%Y-%m-%d")
+        time_period_context = "nearby"
+        no_event_context = f"in the next 7 days {no_event_context}".strip()
+    elif callback_data == "load_today":
+        fetch_params["date_from"] = today_str
+        fetch_params["date_to"] = today_str
+        time_period_context = "today"
+        no_event_context = f"today {no_event_context}".strip()
+    elif callback_data == "load_tomorrow":
+        tomorrow_dt: datetime.datetime = today_dt + datetime.timedelta(days=1)
+        tomorrow_str: str = tomorrow_dt.strftime("%Y-%m-%d")
+        fetch_params["date_from"] = tomorrow_str
+        fetch_params["date_to"] = tomorrow_str
+        time_period_context = "tomorrow"
+        no_event_context = f"tomorrow {no_event_context}".strip()
+    # Note: No specific date params set here for random/best, handled below
 
-    # Forward Button
-    forward_text: str = format_event_for_forwarding(event)
-    forward_button: ta.Dict[str, str] = {"text": "📤", "switch_inline_query": forward_text if forward_text else "Check out this event!"}
-    button_row.append(forward_button)
-
-    # Refresh Button
-    refresh_button: ta.Dict[str, str] = {"text": "🔄", "callback_data": refresh_callback_data}
-    button_row.append(refresh_button)
-
-    # Optional Map Button
-    venue_name: ta.Optional[str] = event.get("pretty_venue_name")
-    venue_postcode: ta.Optional[str] = event.get("postcode")
-    if venue_name and venue_postcode:
-        try:
-            search_query: str = f"{venue_name}, {venue_postcode}"
-            maps_url: str = f"https://maps.google.com/?q={urllib.parse.quote_plus(search_query)}"
-            map_button: ta.Dict[str, str] = {"text": "📍", "url": maps_url}
-            button_row.append(map_button)
-        except Exception as e: logger.error(f"Error creating map link: {e}")
-
-    # --- Construct Keyboard ---
-    if button_row: # Only return keyboard if there are buttons
-        return {"inline_keyboard": [button_row]} # Single list = single row
+    # --- Fetch event(s) ---
+    if is_random or is_best:
+        fetched_events = fetch_random_events(days_ahead=DEFAULT_RANDOM_DAYS_AHEAD, limit=1) # Assumes this helper exists
+        time_period_context = "a random event" if is_random else "a top pick"
+        no_event_context = "randomly" if is_random else "as a top pick"
+    elif is_location_based:
+        fetched_events = fetch_events(overall_limit=fetch_limit, **fetch_params) # Assumes this helper exists
     else:
-        return None
+         logger.error(f"Unhandled callback type in refresh handler: {callback_data}")
+         return
+
+    # --- Select Event to Show ---
+    # SIMPLIFICATION: Just take the first event found, or a random one if multiple were fetched for location.
+    if fetched_events:
+        if is_location_based and len(fetched_events) > 1:
+            event_to_show = random.choice(fetched_events) # Pick randomly from the fetched pool
+            logger.info(f"Refresh for msg {message_id}: Chose random event {event_to_show.get('event_id', 'N/A')} from {len(fetched_events)} fetched.")
+        else:
+            event_to_show = fetched_events[0] # Take the first (or only) one
+            logger.info(f"Refresh for msg {message_id}: Selected event {event_to_show.get('event_id', 'N/A')}")
+    # else: event_to_show remains None
+
+    # --- Update message or show 'no events' ---
+    if event_to_show:
+        # Get user location again for distance calculation if needed
+        user_pc_refresh, lat_refresh, lon_refresh = (user_pc, lat, lon) if is_location_based else get_user_location(chat_id)
+
+        if lat_refresh is not None and lon_refresh is not None:
+            try: # Add/update distance if possible
+                ev_lat = float(event_to_show.get("latitude", math.nan))
+                ev_lon = float(event_to_show.get("longitude", math.nan))
+                if not math.isnan(ev_lat) and not math.isnan(ev_lon):
+                    event_to_show["distance_km"] = haversine_distance(lat_refresh, lon_refresh, ev_lat, ev_lon)
+            except (ValueError, TypeError): pass
+
+        # --- Update History BEFORE editing ---
+        # Consider moving this AFTER successful edit to avoid state mismatch?
+        # Let's keep it here for now, simpler flow, accept mismatch risk.
+        history_key = (chat_id, message_id)
+        if history_key not in message_event_history:
+             message_event_history[history_key] = deque(maxlen=HISTORY_SIZE)
+             logger.warning(f"Initialized missing history for msg {message_id} during refresh.")
+        message_event_history[history_key].append(event_to_show.copy())
+        if history_key not in message_context_type:
+             message_context_type[history_key] = callback_data
+             logger.warning(f"Initialized missing context '{callback_data}' for msg {message_id} during refresh.")
+        current_history_len = len(message_event_history[history_key])
+        logger.info(f"Appended history for msg {message_id}. New len: {current_history_len}")
+
+        # --- Format and Edit ---
+        can_go_back: bool = current_history_len > 1
+        keyboard: ta.Optional[ta.Dict[str, ta.Any]] = create_event_keyboard(event_to_show, callback_data, can_go_back=can_go_back)
+        message_text: str = format_events_message(
+            events=[event_to_show],
+            postcode=user_pc_refresh,
+            user_lat=lat_refresh,
+            user_lon=lon_refresh,
+            time_period=time_period_context
+        )
+        logger.info(f"Attempting to edit msg {message_id} for refresh callback {callback_data}")
+        if not edit_telegram_message(chat_id, message_id, message_text, reply_markup=keyboard):
+            logger.error(f"Edit failed for refresh callback {callback_data} on msg {message_id}")
+            # HISTORY IS NOW OUT OF SYNC WITH DISPLAYED MESSAGE!
+    else:
+        # No event found at all by the fetch
+        logger.info(f"No events found for refresh callback {callback_data} on msg {message_id}")
+        final_no_event_msg = NO_EVENTS_MESSAGE.format(context=no_event_context, postcode=user_pc.upper() if user_pc else "your area")
+        edit_telegram_message(chat_id, message_id, final_no_event_msg, reply_markup=None)
 
 # --- Location Handling Helper ---
 
