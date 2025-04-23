@@ -360,11 +360,11 @@ def format_events_message(
     postcode: str = "",
     user_lat: ta.Optional[float] = None,
     user_lon: ta.Optional[float] = None,
-    show_full_description: bool = False # <<<<< ADDED PARAMETER
+    show_details: bool = False # <<<<< ADDED PARAMETER, default is False (hidden)
 ) -> str:
     """
-    Format a list of events using rich HTML formatting. Includes distance and direction if available.
-    Can optionally include the full original description.
+    Format a list of events. Includes distance/direction if available.
+    Can optionally show/hide the pretty_description and vibes lines.
     """
     if not events: return ""
 
@@ -376,15 +376,15 @@ def format_events_message(
 
     for ev in events:
         event_lines: ta.List[str] = []
+        # Safely get event details
         name: str = (ev.get("pretty_event_name") or "Event").strip()
         venue: str = (ev.get("pretty_venue_name") or "Venue").strip()
         date: str = (ev.get("pretty_date") or ev.get("event_date") or "Date TBC").strip()
         url: str = (ev.get("venue_url") or "").strip()
         vibes: str = (ev.get("vibes") or "").strip()
-        summary: str = (ev.get("pretty_description") or "No description available.").strip()
-        max_summary_len: int = 250
-        if len(summary) > max_summary_len: summary = summary[:max_summary_len] + "..."
+        summary: str = (ev.get("pretty_description") or "").strip() # Use "" as fallback instead of "No description"
 
+        # Format venue with link
         venue_html: str = f"<i>{venue}</i>"
         if url and (url.startswith("http://") or url.startswith("https://")):
             try:
@@ -392,11 +392,24 @@ def format_events_message(
                 venue_html = f'<a href="{encoded_url}">{venue}</a>'
             except Exception as e: logger.warning(f"Failed to encode URL '{url}': {e}")
 
+        # --- Build Message Lines ---
         event_lines.append(f"<b>{name}</b>")
         event_lines.append(f"📍 {venue_html}")
-        event_lines.append(f"👉 {summary}")
-        if vibes: event_lines.append(f"✨ {vibes}")
-        event_lines.append(f"📅 {date}")
+
+        # <<< MODIFIED: Conditionally add summary (pretty_description) and vibes >>>
+        if show_details:
+            if summary: # Only add if summary is not empty
+                 # Truncate here if desired, or assume it's already short
+                 max_summary_len: int = 250
+                 display_summary = summary
+                 if len(display_summary) > max_summary_len: display_summary = display_summary[:max_summary_len] + "..."
+                 event_lines.append(f"👉 {display_summary}")
+
+            if vibes: # Only add if vibes is not empty
+                event_lines.append(f"✨ {vibes}")
+        # <<< END MODIFICATION >>>
+
+        event_lines.append(f"📅 {date}") # Date always shown
 
         # Distance and Direction (logic remains the same)
         if "distance_km" in ev and postcode and user_lat is not None and user_lon is not None:
@@ -413,25 +426,8 @@ def format_events_message(
                 elif dist_km < 10: dist_str = f"{dist_km:.1f}km"
                 else: dist_str = f"{dist_km:.0f}km"
                 event_lines.append(f"🧭 <i>{dist_str} {arrow}from {postcode.upper()}</i>")
-            except (ValueError, TypeError, KeyError):
-                 logger.warning(f"Error processing distance/bearing for event {ev.get('event_id')}", exc_info=False) # Reduced logging noise
-
-        # <<<<< ADDED: Full Description Logic >>>>>
-        if show_full_description:
-            original_desc = ev.get("description") # *** ASSUMES 'description' key exists ***
-            if original_desc and isinstance(original_desc, str):
-                # Simple formatting for the original description
-                # Avoid adding if it's identical to the pretty description already shown
-                if original_desc.strip() != summary.strip().replace("...", ""): # Basic check
-                     # Limit length of displayed original description too?
-                     max_original_desc = 1000
-                     display_desc = original_desc.strip()
-                     if len(display_desc) > max_original_desc:
-                         display_desc = display_desc[:max_original_desc] + "..."
-                     event_lines.append(f"\n<b>Full Details:</b>\n{display_desc}")
-            elif original_desc:
-                logger.warning(f"Original description for event {ev.get('event_id')} is not a string.")
-        # <<<<< END Full Description Logic >>>>>
+            except (ValueError, TypeError, KeyError) as e:
+                 logger.warning(f"Error processing distance/bearing for event {ev.get('event_id')}: {e}", exc_info=False)
 
         lines.append("\n".join(event_lines))
 
@@ -442,48 +438,57 @@ def create_event_keyboard(
     event: ta.Dict[str, ta.Any],
     refresh_callback_data: str,
     can_go_back: bool,
-    is_currently_expanded: bool # <<<<< ADDED PARAMETER
+    is_currently_expanded: bool # <<<<< ADDED PARAMETER BACK
     ) -> ta.Optional[ta.Dict[str, ta.Any]]:
-    """Creates the inline keyboard with emoji-only buttons on a single row."""
+    """
+    Creates the inline keyboard with relevant buttons based on context.
+    Button order: Back | Toggle | Refresh | Map | Forward
+    """
+    button_row: ta.List[ta.Dict[str, str]] = []
 
-    button_row: ta.List[ta.Dict[str, str]] = [] # All buttons go in this list
-    original_desc: ta.Optional[str] = event.get("description") # Check if description exists
+    # Check if there are details (summary or vibes) to toggle
+    summary = (event.get("pretty_description") or "").strip()
+    vibes = (event.get("vibes") or "").strip()
+    has_details_to_toggle = bool(summary or vibes) # Toggle if either exists
 
     # --- Define and Add Buttons in Order ---
 
-    # Back Button (Conditional)
+    # 1. Back Button (Conditional)
     if can_go_back:
         button_row.append({"text": "⏪", "callback_data": "show_previous"})
 
-    # Toggle Button (Show More/Less) - Conditional
-    if original_desc and isinstance(original_desc, str) and original_desc.strip(): # Only show if desc exists and is non-empty string
+    # 2. Toggle Button (Show More/Less) - Conditional
+    if has_details_to_toggle: # Only show if there are details to toggle
         if is_currently_expanded:
-            # Currently expanded, show "Show Less" button
+            # Currently expanded -> show "Less" button '➖'
             button_row.append({"text": "➖", "callback_data": "toggle_details_hide"})
         else:
-            # Currently collapsed, show "Show More" button
+            # Currently collapsed -> show "More" button '➕'
             button_row.append({"text": "➕", "callback_data": "toggle_details_show"})
 
-    # Refresh Button
+    # 3. Refresh Button
     button_row.append({"text": "🔄", "callback_data": refresh_callback_data})
 
-    # Map Button (Conditional)
+    # 4. Map Button (Conditional)
     venue_name: ta.Optional[str] = event.get("pretty_venue_name")
-    venue_postcode: ta.Optional[str] = event.get("postcode") # Uses postcode from events_enriched
+    venue_postcode: ta.Optional[str] = event.get("postcode")
     if venue_name and venue_postcode:
         try:
             search_query: str = f"{venue_name}, {venue_postcode}"
-            maps_url: str = f"https://maps.google.com/?q={urllib.parse.quote_plus(search_query)}" # Use HTTPS
+            maps_url: str = f"https://www.google.com/maps/search/?api=1&query=LATITUDE,LONGITUDE{urllib.parse.quote_plus(search_query)}" # Use HTTPS
             button_row.append({"text": "📍", "url": maps_url})
         except Exception as e: logger.error(f"Error creating map link: {e}")
 
-    # Forward Button
-    forward_text: str = format_event_for_forwarding(event)
-    button_row.append({"text": "📤", "switch_inline_query": forward_text or "Check out this event!"})
+    # 5. Forward Button
+    try:
+        forward_text: str = format_event_for_forwarding(event)
+        button_row.append({"text": "📤", "switch_inline_query": forward_text or "Check out this event!"})
+    except Exception as e:
+        logger.error(f"Error formatting event for forwarding: {e}")
 
     # --- Construct Keyboard ---
-    if button_row: # Only return keyboard if there are buttons
-        return {"inline_keyboard": [button_row]} # Single list = single row
+    if button_row:
+        return {"inline_keyboard": [button_row]}
     else:
         return None
 
@@ -783,25 +788,19 @@ def send_event_messages(
 
 def process_message(msg: ta.Dict[str, ta.Any]) -> None:
     """Handles incoming text messages and commands."""
+    # ... (initial setup, chat info, user info, text processing) ...
     chat_info: ta.Dict[str, ta.Any] = msg.get('chat', {})
     chat_id: str = str(chat_info.get('id', ''))
     chat_type: str = chat_info.get('type', '')
     user_info: ta.Dict[str, ta.Any] = msg.get('from', {})
-    user_id: str = str(user_info.get('id', '')) # Get user ID for logging/potential use
+    user_id: str = str(user_info.get('id', ''))
 
-    if not chat_id or user_info.get('is_bot') or msg.get('edit_date'):
-        return # Basic validation
-
+    if not chat_id or user_info.get('is_bot') or msg.get('edit_date'): return
     text_raw: str = (msg.get('text') or '').strip()
     text_lower: str = text_raw.lower()
-
     logger.info(f"Processing message from chat {chat_id} (user: {user_id}): '{text_raw}'")
-
-    # Update DB info (chat details, ensure subscription if private)
     upsert_chat_info(chat_id, chat_type, user_info)
-
-    # Define help text
-    help_text = (
+    help_text = ( # Define help_text
         "Welcome to <b>Niche London</b> 👋\n\n"
         "We find local events happening across London!\n\n"
         "My commands:\n"
@@ -810,40 +809,18 @@ def process_message(msg: ta.Dict[str, ta.Any]) -> None:
         "/today - What's on today? 🔜\n"
         "/tomorrow - What's on tomorrow? 👣\n"
         "/random - I'm feeling lucky 🍀\n"
-        #"/subscribe - Weekly roundup 📬\n" # Maybe remove if handled automatically
-        #"/unsubscribe - Stop already! 🫗\n" # Maybe remove if handled automatically
         "/updatelocation - Update map pinhead 📍\n"
         "/help - Show this message\n\n"
         "Or, send a London postcode (e.g., <i>E8 3PN</i>)!"
     )
-
     # --- Command Routing ---
-
-    # Simple commands first
-    if text_lower in ["/start", "/help", "help", "hello", "hi", "?"]:
+    if text_lower in ["/start", "/help", "help", "hello", "hi", "?"]: # Simple Commands
         awaiting_location_update[chat_id] = False
-        send_telegram_message(chat_id, help_text)
-        return
-
+        send_telegram_message(chat_id, help_text); return
     if text_lower == "/updatelocation":
         awaiting_location_update[chat_id] = True
-        send_telegram_message(chat_id, "OK. Please send me your London postcode (e.g., SW1A 0AA).")
-        return
-
-    if text_lower == "/subscribe": # Example, might be auto-subscribe
-        if chat_type == 'private':
-            awaiting_location_update[chat_id] = False
-            send_telegram_message(chat_id, "You're set to receive the weekly roundup!")
-        else: send_telegram_message(chat_id, "Subscription commands only work in private chat with me.")
-        return
-
-    if text_lower == "/unsubscribe": # Example
-        if chat_type == 'private':
-            awaiting_location_update[chat_id] = False
-            if unsubscribe_user(chat_id): send_telegram_message(chat_id, "You've been unsubscribed.")
-            else: send_telegram_message(chat_id, "Sorry, there was an error trying to unsubscribe.")
-        else: send_telegram_message(chat_id, "Subscription commands only work in private chat with me.")
-        return
+        send_telegram_message(chat_id, "OK. Please send me your London postcode (e.g., SW1A 0AA)."); return
+    # ... (subscribe/unsubscribe if needed) ...
 
     # --- Single Event Commands ---
     single_event_command_map = {
@@ -853,27 +830,21 @@ def process_message(msg: ta.Dict[str, ta.Any]) -> None:
         "/random": ("load_random", "a random event", False),
         "/best": ("load_best", "a top pick", False),
     }
-
     if text_lower in single_event_command_map:
         awaiting_location_update[chat_id] = False
         callback_data, time_period_context, is_location_based = single_event_command_map[text_lower]
-
-        user_pc: ta.Optional[str] = None
-        lat: ta.Optional[float] = None
-        lon: ta.Optional[float] = None
-        event: ta.Optional[ta.Dict[str, ta.Any]] = None
-        events: ta.List[ta.Dict[str, ta.Any]] = []
+        user_pc: ta.Optional[str] = None; lat: ta.Optional[float] = None; lon: ta.Optional[float] = None
+        event: ta.Optional[ta.Dict[str, ta.Any]] = None; events: ta.List[ta.Dict[str, ta.Any]] = []
         no_event_context: str = ""
-
-        # Get location if required by command
+        # Get location if needed
         if is_location_based:
             user_pc, lat, lon = get_user_location(chat_id)
             if not user_pc: send_telegram_message(chat_id, LOCATION_PROMPT_MESSAGE); return
             if lat is None or lon is None: send_telegram_message(chat_id, GEOCODE_ERROR_MESSAGE.format(postcode=user_pc)); return
             no_event_context = f"near {user_pc.upper()}"
-
         # Fetch the event
         try:
+            # ... (fetch logic based on text_lower remains the same) ...
             if text_lower == "/local":
                  fetch_params = {"date_from": datetime.datetime.utcnow().strftime("%Y-%m-%d"), "date_to": (datetime.datetime.utcnow() + datetime.timedelta(days=7)).strftime("%Y-%m-%d"), "user_lat": lat, "user_lon": lon}
                  no_event_context = f"in the next 7 days {no_event_context}".strip()
@@ -890,91 +861,74 @@ def process_message(msg: ta.Dict[str, ta.Any]) -> None:
                  events = fetch_events(overall_limit=1, **fetch_params)
             elif text_lower == "/random" or text_lower == "/best":
                  events = fetch_random_events(days_ahead=DEFAULT_RANDOM_DAYS_AHEAD, limit=1)
-                 no_event_context = "matching that criteria" # Generic fallback for random/best
-
+                 no_event_context = "matching that criteria"
+            # Check results and add distance
             if events:
                 event = events[0]
-                # Attempt to add distance if user location known (even for random/best)
                 user_pc_dist, lat_dist, lon_dist = get_user_location(chat_id)
                 if lat_dist is not None and lon_dist is not None:
-                     try:
-                         ev_lat = float(event.get("latitude", math.nan))
-                         ev_lon = float(event.get("longitude", math.nan))
-                         if not math.isnan(ev_lat) and not math.isnan(ev_lon):
-                            event["distance_km"] = haversine_distance(lat_dist, lon_dist, ev_lat, ev_lon)
-                     except (ValueError, TypeError): pass # Ignore errors adding distance
-            else:
-                # No events found
-                send_telegram_message(chat_id, NO_EVENTS_MESSAGE.format(context=no_event_context, postcode=user_pc.upper() if user_pc else "your area"))
-                return
-
-        except Exception as e:
-            logger.error(f"Error fetching event for command {text_lower}: {e}", exc_info=True)
-            send_telegram_message(chat_id, DEFAULT_ERROR_MESSAGE); return
+                     try: # Add distance if possible
+                         ev_lat = float(event.get("latitude", math.nan)); ev_lon = float(event.get("longitude", math.nan))
+                         if not math.isnan(ev_lat) and not math.isnan(ev_lon): event["distance_km"] = haversine_distance(lat_dist, lon_dist, ev_lat, ev_lon)
+                     except: pass
+            else: send_telegram_message(chat_id, NO_EVENTS_MESSAGE.format(context=no_event_context, postcode=user_pc.upper() if user_pc else "your area")); return
+        except Exception as e: logger.error(f"Error fetching event for {text_lower}: {e}", exc_info=True); send_telegram_message(chat_id, DEFAULT_ERROR_MESSAGE); return
 
         # Send the event message
         if event:
             try:
+                # ***** MODIFIED Calls *****
                 # Initial state is always collapsed, cannot go back
-                keyboard = create_event_keyboard(event, callback_data, can_go_back=False, is_currently_expanded=False)
+                keyboard = create_event_keyboard(
+                    event=event,
+                    refresh_callback_data=callback_data,
+                    can_go_back=False,
+                    is_currently_expanded=False # <<< Pass False
+                )
+                # Initial format is collapsed
                 message_text = format_events_message(
                     events=[event],
                     time_period=time_period_context,
                     postcode=user_pc, user_lat=lat, user_lon=lon,
-                    show_full_description=False # Initial view is collapsed
+                    show_details=False # <<< Pass False
                 )
-
-                # Use helper that returns API response to get message_id
-                sent_message_data = _telegram_api_request("sendMessage", {
+                # Use _telegram_api_request to get message data for history
+                sent_message_api_response = _telegram_api_request("sendMessage", {
                      "chat_id": str(chat_id), "text": message_text, "parse_mode": "HTML",
                      "disable_web_page_preview": True, "reply_markup": json.dumps(keyboard if keyboard else {})
                  })
-
                 # Initialize History if message sent successfully
-                if sent_message_data and isinstance(sent_message_data.get("result"), dict) and (msg_id := sent_message_data["result"].get('message_id')):
+                if sent_message_api_response and isinstance(sent_message_api_response.get("result"), dict) and (msg_id := sent_message_api_response["result"].get('message_id')):
                     history_key = (str(chat_id), msg_id)
-                    # Ensure full event data (including 'description') is stored
-                    message_event_history[history_key] = deque([event.copy()], maxlen=HISTORY_SIZE)
+                    message_event_history[history_key] = deque([event.copy()], maxlen=HISTORY_SIZE) # Store copy
                     message_context_type[history_key] = callback_data
                     logger.info(f"Initialized history for msg {msg_id} in chat {chat_id} with event {event.get('event_id')}")
-                else:
-                    logger.error(f"Failed to get message_id after sending {text_lower} command to {chat_id}. API Response: {sent_message_data}")
-
-            except Exception as e:
-                logger.error(f"Error formatting/sending event for command {text_lower}: {e}", exc_info=True)
-                send_telegram_message(chat_id, DEFAULT_ERROR_MESSAGE)
-        # No 'else' needed here, handled within fetch logic
+                else: logger.error(f"Failed to get message_id after sending {text_lower} command to {chat_id}. API Response: {sent_message_api_response}")
+            except Exception as e: logger.error(f"Error formatting/sending event for {text_lower}: {e}", exc_info=True); send_telegram_message(chat_id, DEFAULT_ERROR_MESSAGE)
         return # End processing for single event commands
 
     # --- Postcode Handling ---
     elif is_valid_london_postcode(text_raw.upper()):
+        # ... (postcode handling logic remains the same) ...
         postcode_norm: str = text_raw.upper()
         if awaiting_location_update.get(chat_id, False):
-            # Process location update
             lat_check, lon_check = geocode_postcode_to_latlon(postcode_norm)
             if lat_check is not None and lon_check is not None:
-                if set_user_postcode(chat_id, postcode_norm):
-                    send_telegram_message(chat_id, f"✅ Location updated to {postcode_norm}!")
+                if set_user_postcode(chat_id, postcode_norm): send_telegram_message(chat_id, f"✅ Location updated to {postcode_norm}!")
                 else: send_telegram_message(chat_id, "⚠️ There was an error saving your postcode.")
             else: send_telegram_message(chat_id, f"⚠️ Couldn't find coordinates for {postcode_norm}. Please try a different London postcode.")
-            awaiting_location_update[chat_id] = False # Always reset flag
+            awaiting_location_update[chat_id] = False
         else:
-            # Process direct postcode query (multiple results, no buttons)
             lat_pc, lon_pc = geocode_postcode_to_latlon(postcode_norm)
-            if not lat_pc or not lon_pc:
-                send_telegram_message(chat_id, f"Sorry, I couldn’t find coordinates for {postcode_norm}."); return
-
+            if not lat_pc or not lon_pc: send_telegram_message(chat_id, f"Sorry, I couldn’t find coordinates for {postcode_norm}."); return
             send_telegram_message(chat_id, f"OK, looking for events near {postcode_norm}...")
             today_dt_pc: datetime.datetime = datetime.datetime.utcnow()
             events_pc: ta.List[ta.Dict[str, ta.Any]] = fetch_events(
                 date_from=today_dt_pc.strftime("%Y-%m-%d"),
                 date_to=(today_dt_pc + datetime.timedelta(days=7)).strftime("%Y-%m-%d"),
-                user_lat=lat_pc, user_lon=lon_pc,
-                overall_limit=5 # Use a default limit for this case
+                user_lat=lat_pc, user_lon=lon_pc, overall_limit=5
             )
-            if events_pc:
-                 # Use send_event_messages for multi-message display
-                 send_event_messages( chat_id=chat_id, events=events_pc, postcode=postcode_norm, user_lat=lat_pc, user_lon=lon_pc )
+            if events_pc: send_event_messages( chat_id=chat_id, events=events_pc, postcode=postcode_norm, user_lat=lat_pc, user_lon=lon_pc )
             else: send_telegram_message(chat_id, f"Couldn't find any events near {postcode_norm} in the next 7 days.")
         return # End postcode processing
 
@@ -988,7 +942,7 @@ def process_callback_query(callback_query: ta.Dict[str, ta.Any]) -> None:
     """Handles incoming callback queries."""
     query_id: ta.Optional[str] = callback_query.get('id')
     message: ta.Optional[ta.Dict[str, ta.Any]] = callback_query.get('message')
-    data: ta.Optional[str] = callback_query.get('data') # e.g., "load_random", "toggle_details_show"
+    data: ta.Optional[str] = callback_query.get('data')
 
     if not query_id or not message or not data:
         logger.warning("Received incomplete callback query.")
@@ -998,24 +952,98 @@ def process_callback_query(callback_query: ta.Dict[str, ta.Any]) -> None:
     chat_id: str = str(message.get('chat', {}).get('id', ''))
     message_id: ta.Optional[int] = message.get('message_id')
 
-    # Acknowledge first
-    answer_callback_query(query_id)
+    answer_callback_query(query_id) # Acknowledge first
 
     if not chat_id or not message_id:
         logger.error(f"Could not get chat_id/message_id from callback {query_id}"); return
 
-    history_key = (chat_id, message_id) # Consistent key type
+    history_key = (chat_id, message_id)
 
     # --- Route Callback Data ---
 
     # --- Refresh Actions ---
     if data.startswith("load_"):
         try:
-            # Refactored refresh logic (assumes helper exists or paste logic here)
-            handle_refresh_callback(chat_id, message_id, data)
+            # ***** Refactored refresh logic is now INLINE for clarity *****
+            # --- Initial Setup for Refresh ---
+            fetch_params: ta.Dict[str, ta.Any] = {}
+            user_pc: ta.Optional[str] = None; lat: ta.Optional[float] = None; lon: ta.Optional[float] = None
+            fetch_limit: int = DEFAULT_EVENT_FETCH_LIMIT
+            is_location_based: bool = data in ["load_local", "load_today", "load_tomorrow"]
+            is_random: bool = data == "load_random"; is_best: bool = data == "load_best"
+            time_period_context: str = ""; no_event_context: str = ""
+            event_to_show: ta.Optional[ta.Dict[str, ta.Any]] = None; fetched_events: ta.List[ta.Dict[str, ta.Any]] = []
+
+            # --- Get Location if Needed ---
+            if is_location_based:
+                user_pc, lat, lon = get_user_location(chat_id)
+                if not user_pc: edit_telegram_message(chat_id, message_id, LOCATION_PROMPT_MESSAGE, None); return
+                if lat is None or lon is None: edit_telegram_message(chat_id, message_id, GEOCODE_ERROR_MESSAGE.format(postcode=user_pc), None); return
+                fetch_params.update({"user_lat": lat, "user_lon": lon}); no_event_context = f"near {user_pc.upper()}"
+
+            # --- Determine Fetch Dates/Context ---
+            today_dt: datetime.datetime = datetime.datetime.utcnow(); today_str: str = today_dt.strftime("%Y-%m-%d")
+            if data == "load_local":
+                fetch_params["date_from"] = today_str; fetch_params["date_to"] = (today_dt + datetime.timedelta(days=7)).strftime("%Y-%m-%d")
+                time_period_context = "nearby"; no_event_context = f"in the next 7 days {no_event_context}".strip()
+            elif data == "load_today":
+                fetch_params["date_from"] = today_str; fetch_params["date_to"] = today_str
+                time_period_context = "today"; no_event_context = f"today {no_event_context}".strip()
+            elif data == "load_tomorrow":
+                tomorrow_str = (today_dt + datetime.timedelta(days=1)).strftime("%Y-%m-%d")
+                fetch_params["date_from"] = tomorrow_str; fetch_params["date_to"] = tomorrow_str
+                time_period_context = "tomorrow"; no_event_context = f"tomorrow {no_event_context}".strip()
+
+            # --- Fetch event(s) ---
+            if is_random or is_best:
+                fetched_events = fetch_random_events(days_ahead=DEFAULT_RANDOM_DAYS_AHEAD, limit=fetch_limit) # Fetch more for random choice
+                time_period_context = "a random event" if is_random else "a top pick"; no_event_context = "randomly" if is_random else "as a top pick"
+            elif is_location_based: fetched_events = fetch_events(overall_limit=fetch_limit, **fetch_params)
+            else: logger.error(f"Unhandled callback type in refresh handler: {data}"); return
+
+            # --- Select Event to Show (Try not to repeat) ---
+            history = message_event_history.get(history_key)
+            last_event_id = history[-1].get('event_id') if history else None
+            if fetched_events:
+                 if len(fetched_events) > 1 and last_event_id:
+                     different_events = [e for e in fetched_events if e.get('event_id') != last_event_id]
+                     event_to_show = random.choice(different_events) if different_events else fetched_events[0]
+                 elif fetched_events: event_to_show = fetched_events[0]
+            logger.info(f"Refresh selected event {event_to_show.get('event_id') if event_to_show else 'None'}")
+
+            # --- Update message or show 'no events' ---
+            if event_to_show:
+                user_pc_refresh, lat_refresh, lon_refresh = (user_pc, lat, lon) if is_location_based else get_user_location(chat_id)
+                if lat_refresh is not None and lon_refresh is not None: # Add distance
+                    try:
+                        ev_lat = float(event_to_show.get("latitude", math.nan)); ev_lon = float(event_to_show.get("longitude", math.nan))
+                        if not math.isnan(ev_lat) and not math.isnan(ev_lon): event_to_show["distance_km"] = haversine_distance(lat_refresh, lon_refresh, ev_lat, ev_lon)
+                    except: pass
+                # Update History
+                if history_key not in message_event_history: message_event_history[history_key] = deque(maxlen=HISTORY_SIZE)
+                message_event_history[history_key].append(event_to_show.copy())
+                if history_key not in message_context_type: message_context_type[history_key] = data
+                current_history_len = len(message_event_history[history_key])
+                logger.info(f"Appended history for msg {message_id}. New len: {current_history_len}")
+                # Format and Edit
+                can_go_back: bool = current_history_len > 1
+                # Call keyboard creator with expanded=False (refresh resets view)
+                keyboard: ta.Optional[ta.Dict[str, ta.Any]] = create_event_keyboard(
+                    event=event_to_show, refresh_callback_data=data,
+                    can_go_back=can_go_back, is_currently_expanded=False # <<< Pass False
+                )
+                # Call formatter with expanded=False (refresh resets view)
+                message_text: str = format_events_message(
+                    events=[event_to_show], postcode=user_pc_refresh, user_lat=lat_refresh, user_lon=lon_refresh,
+                    time_period=time_period_context, show_details=False # <<< Pass False
+                )
+                if not edit_telegram_message(chat_id, message_id, message_text, reply_markup=keyboard):
+                    logger.error(f"Edit failed for refresh callback {data} on msg {message_id}")
+            else: # No event found
+                final_no_event_msg = NO_EVENTS_MESSAGE.format(context=f"further {no_event_context}", postcode=user_pc.upper() if user_pc else "your area")
+                edit_telegram_message(chat_id, message_id, final_no_event_msg, reply_markup=None)
         except Exception as e:
             logger.error(f"Error in handle_refresh_callback for {data}: {e}", exc_info=True)
-            # Try to notify user via edit?
             try: edit_telegram_message(chat_id, message_id, DEFAULT_ERROR_MESSAGE, reply_markup=None)
             except Exception: pass
 
@@ -1023,142 +1051,95 @@ def process_callback_query(callback_query: ta.Dict[str, ta.Any]) -> None:
     elif data == "show_previous":
         logger.info(f"Processing 'show_previous' for msg {message_id} in chat {chat_id}")
         history = message_event_history.get(history_key)
-        # Use original context saved when history was initialized
-        original_context_callback_data = message_context_type.get(history_key)
-
-        if history and len(history) > 1 and original_context_callback_data:
+        original_context = message_context_type.get(history_key)
+        if history and len(history) > 1 and original_context:
             try:
-                history.pop() # Remove the current one from the end
-                event_to_show = history[-1] # Get the new last one (the previous)
-
-                can_go_back = len(history) > 1 # Can we go back further?
-
-                # Get location data for formatting distance/direction
+                history.pop() # Remove current
+                event_to_show = history[-1] # Get previous
+                can_go_back = len(history) > 1
                 user_pc_back, lat_back, lon_back = get_user_location(chat_id)
-                # Add distance back if possible/relevant
+                # Add distance
                 if lat_back is not None and lon_back is not None:
                     try:
-                        ev_lat = float(event_to_show.get("latitude", math.nan))
-                        ev_lon = float(event_to_show.get("longitude", math.nan))
-                        if not math.isnan(ev_lat) and not math.isnan(ev_lon):
-                            # Ensure distance_km key exists before accessing
-                            event_to_show["distance_km"] = haversine_distance(lat_back, lon_back, ev_lat, ev_lon)
-                    except (ValueError, TypeError): pass
-
-                # Re-create keyboard with updated back status, always collapsed on 'back'
+                        ev_lat=float(event_to_show.get("latitude",math.nan)); ev_lon=float(event_to_show.get("longitude",math.nan))
+                        if not math.isnan(ev_lat) and not math.isnan(ev_lon): event_to_show["distance_km"] = haversine_distance(lat_back, lon_back, ev_lat, ev_lon)
+                    except: pass
+                # ***** MODIFIED Calls *****
                 keyboard = create_event_keyboard(
-                    event=event_to_show,
-                    refresh_callback_data=original_context_callback_data, # Use original context for refresh
-                    can_go_back=can_go_back,
-                    is_currently_expanded=False # Going back resets view
+                    event=event_to_show, refresh_callback_data=original_context,
+                    can_go_back=can_go_back, is_currently_expanded=False # <<< Pass False
                 )
-                # Re-format message, always collapsed on 'back'
                 message_text = format_events_message(
-                    events=[event_to_show],
-                    postcode=user_pc_back, user_lat=lat_back, user_lon=lon_back,
-                    show_full_description=False # Going back resets view
+                    events=[event_to_show], postcode=user_pc_back, user_lat=lat_back, user_lon=lon_back,
+                    show_details=False # <<< Pass False
                 )
-                if not edit_telegram_message(chat_id, message_id, message_text, reply_markup=keyboard):
-                     logger.error(f"Edit failed for show_previous on msg {message_id}")
-
-            except Exception as e:
-                logger.error(f"Error processing show_previous for msg {message_id}: {e}", exc_info=True)
-                try: edit_telegram_message(chat_id, message_id, DEFAULT_ERROR_MESSAGE, reply_markup=None)
-                except Exception: pass
-
-        elif history and len(history) == 1:
-            # Already at the first event, just remove back button if present
+                if not edit_telegram_message(chat_id, message_id, message_text, reply_markup=keyboard): logger.error(f"Edit failed for show_previous on msg {message_id}")
+            except Exception as e: logger.error(f"Error processing show_previous: {e}", exc_info=True); edit_telegram_message(chat_id, message_id, DEFAULT_ERROR_MESSAGE, None)
+        elif history and len(history) == 1: # At oldest
             logger.info(f"Cannot go back further for msg {message_id}, already at oldest.")
-            try:
-                event_to_show = history[-1]
-                original_context = message_context_type.get(history_key, "load_random") # Fallback context
-                keyboard = create_event_keyboard(event_to_show, original_context, can_go_back=False, is_currently_expanded=False)
-                # Edit only the keyboard
+            try: # Just remove back button
+                event_to_show = history[-1]; original_context = message_context_type.get(history_key, "load_random")
+                keyboard = create_event_keyboard(event_to_show, original_context, can_go_back=False, is_currently_expanded=False) # <<< Pass False
                 _telegram_api_request("editMessageReplyMarkup", {"chat_id": chat_id, "message_id": message_id, "reply_markup": json.dumps(keyboard if keyboard else {})})
-            except Exception as e:
-                 logger.error(f"Error editing keyboard for show_previous (at oldest) for msg {message_id}: {e}", exc_info=True)
-        else:
-            # History not found or empty
-            logger.warning(f"Could not find history or context for 'show_previous' on msg {message_id}")
+            except Exception as e: logger.error(f"Error editing keyboard for show_previous (at oldest): {e}", exc_info=True)
+        else: logger.warning(f"Could not find history/context for 'show_previous' on msg {message_id}")
 
     # --- Toggle Actions ---
     elif data == "toggle_details_show":
         logger.info(f"Processing 'toggle_details_show' for msg {message_id}")
         history = message_event_history.get(history_key)
         original_context = message_context_type.get(history_key)
-
         if history and original_context:
             try:
-                event_to_show = history[-1] # Get current event from history
+                event_to_show = history[-1] # Use current event from history
                 can_go_back = len(history) > 1
-
-                # Format message WITH full description
                 user_pc_toggle, lat_toggle, lon_toggle = get_user_location(chat_id)
-                # Ensure distance is present if possible
+                # Ensure distance present
                 if lat_toggle is not None and lon_toggle is not None and "distance_km" not in event_to_show:
                      try:
-                         ev_lat = float(event_to_show.get("latitude", math.nan))
-                         ev_lon = float(event_to_show.get("longitude", math.nan))
+                         ev_lat=float(event_to_show.get("latitude",math.nan)); ev_lon=float(event_to_show.get("longitude",math.nan))
                          if not math.isnan(ev_lat) and not math.isnan(ev_lon): event_to_show["distance_km"] = haversine_distance(lat_toggle, lon_toggle, ev_lat, ev_lon)
                      except: pass
+                # ***** MODIFIED Calls *****
                 message_text = format_events_message(
                     events=[event_to_show], postcode=user_pc_toggle, user_lat=lat_toggle, user_lon=lon_toggle,
-                    show_full_description=True # <<< Show details
+                    show_details=True # <<< Show details
                 )
-                # Create keyboard for the EXPANDED state (show "less" button '➖')
                 keyboard = create_event_keyboard(
-                    event=event_to_show,
-                    refresh_callback_data=original_context,
-                    can_go_back=can_go_back,
-                    is_currently_expanded=True # <<< State is now expanded
+                    event=event_to_show, refresh_callback_data=original_context,
+                    can_go_back=can_go_back, is_currently_expanded=True # <<< State is now expanded
                 )
-                if not edit_telegram_message(chat_id, message_id, message_text, reply_markup=keyboard):
-                    logger.error(f"Edit failed for toggle_details_show on msg {message_id}")
-            except Exception as e:
-                 logger.error(f"Error processing toggle_details_show for msg {message_id}: {e}", exc_info=True)
-                 try: edit_telegram_message(chat_id, message_id, DEFAULT_ERROR_MESSAGE, reply_markup=None)
-                 except Exception: pass
-        else:
-            logger.warning(f"History or context not found for toggle_details_show on msg {message_id}")
+                if not edit_telegram_message(chat_id, message_id, message_text, reply_markup=keyboard): logger.error(f"Edit failed for toggle_details_show on msg {message_id}")
+            except Exception as e: logger.error(f"Error processing toggle_details_show: {e}", exc_info=True); edit_telegram_message(chat_id, message_id, DEFAULT_ERROR_MESSAGE, None)
+        else: logger.warning(f"History/context not found for toggle_details_show on msg {message_id}")
 
     elif data == "toggle_details_hide":
         logger.info(f"Processing 'toggle_details_hide' for msg {message_id}")
         history = message_event_history.get(history_key)
         original_context = message_context_type.get(history_key)
-
         if history and original_context:
             try:
-                event_to_show = history[-1] # Get current event
+                event_to_show = history[-1] # Use current event
                 can_go_back = len(history) > 1
-
-                # Format message WITHOUT full description
                 user_pc_toggle, lat_toggle, lon_toggle = get_user_location(chat_id)
-                 # Ensure distance is present if possible
+                # Ensure distance present
                 if lat_toggle is not None and lon_toggle is not None and "distance_km" not in event_to_show:
                      try:
-                         ev_lat = float(event_to_show.get("latitude", math.nan))
-                         ev_lon = float(event_to_show.get("longitude", math.nan))
+                         ev_lat=float(event_to_show.get("latitude",math.nan)); ev_lon=float(event_to_show.get("longitude",math.nan))
                          if not math.isnan(ev_lat) and not math.isnan(ev_lon): event_to_show["distance_km"] = haversine_distance(lat_toggle, lon_toggle, ev_lat, ev_lon)
                      except: pass
+                # ***** MODIFIED Calls *****
                 message_text = format_events_message(
                     events=[event_to_show], postcode=user_pc_toggle, user_lat=lat_toggle, user_lon=lon_toggle,
-                    show_full_description=False # <<< Hide details
+                    show_details=False # <<< Hide details
                 )
-                # Create keyboard for the COLLAPSED state (show "more" button '➕')
                 keyboard = create_event_keyboard(
-                    event=event_to_show,
-                    refresh_callback_data=original_context,
-                    can_go_back=can_go_back,
-                    is_currently_expanded=False # <<< State is now collapsed
+                    event=event_to_show, refresh_callback_data=original_context,
+                    can_go_back=can_go_back, is_currently_expanded=False # <<< State is now collapsed
                 )
-                if not edit_telegram_message(chat_id, message_id, message_text, reply_markup=keyboard):
-                    logger.error(f"Edit failed for toggle_details_hide on msg {message_id}")
-            except Exception as e:
-                 logger.error(f"Error processing toggle_details_hide for msg {message_id}: {e}", exc_info=True)
-                 try: edit_telegram_message(chat_id, message_id, DEFAULT_ERROR_MESSAGE, reply_markup=None)
-                 except Exception: pass
-        else:
-            logger.warning(f"History or context not found for toggle_details_hide on msg {message_id}")
+                if not edit_telegram_message(chat_id, message_id, message_text, reply_markup=keyboard): logger.error(f"Edit failed for toggle_details_hide on msg {message_id}")
+            except Exception as e: logger.error(f"Error processing toggle_details_hide: {e}", exc_info=True); edit_telegram_message(chat_id, message_id, DEFAULT_ERROR_MESSAGE, None)
+        else: logger.warning(f"History/context not found for toggle_details_hide on msg {message_id}")
 
     # --- Fallback ---
     else:
