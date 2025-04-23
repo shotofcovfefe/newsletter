@@ -29,7 +29,6 @@ logger.setLevel(logging.INFO) # Explicitly set level for this logger
 SUPABASE_URL: ta.Optional[str] = os.getenv("SUPABASE_URL")
 SUPABASE_KEY: ta.Optional[str] = os.getenv("SUPABASE_KEY")
 TELEGRAM_BOT_TOKEN: ta.Optional[str] = os.getenv("TELEGRAM_BOT_TOKEN")
-BOT_USERNAME: str = "niche_london"
 
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
@@ -159,24 +158,46 @@ def send_telegram_message(chat_id: str, text: str, reply_markup: ta.Optional[ta.
     return last_part_response_data if overall_success else None
 
 def format_event_for_forwarding(event: ta.Dict[str, ta.Any]) -> str:
-    """Creates a simple text summary of an event suitable for forwarding."""
+    """Creates a nicer plain text summary of an event suitable for forwarding."""
     lines = []
-    name = (event.get("pretty_event_name") or "Event").strip()
-    venue = (event.get("pretty_venue_name") or "Venue").strip()
-    date = (event.get("pretty_date") or event.get("event_date") or "Date TBC").strip()
-    url = (event.get("venue_url") or "").strip()
-    summary = (event.get("pretty_description") or "").strip() # Shorter summary maybe?
-    max_fwd_summary = 100
-    if len(summary) > max_fwd_summary:
-         summary = summary[:max_fwd_summary] + "..."
 
-    lines.append(f"{name} @ {venue} ({date})")
+    # --- Core Event Info ---
+    # Use pretty names with fallbacks
+    name = (event.get("pretty_event_name") or event.get("title") or "Event").strip()
+    venue = (event.get("pretty_venue_name") or "Venue").strip() # Assume pretty_venue_name exists
+    date = (event.get("pretty_date") or event.get("event_date") or "Date TBC").strip()
+
+    # Use markdown-like bold for name (might render after sending)
+    lines.append(f"*{name}*")
+    lines.append(f"📍 {venue}")
+    lines.append(f"📅 {date}")
+    lines.append("") # Add a blank line for separation
+
+    # --- Optional Details ---
+    # Include summary (pretty_description) if it exists
+    summary = (event.get("pretty_description") or "").strip()
     if summary:
-        lines.append(summary)
+        # Truncate summary for forwarding context
+        max_fwd_summary = 150 # Keep it relatively brief
+        if len(summary) > max_fwd_summary:
+             summary = summary[:max_fwd_summary].strip() + "..."
+        lines.append(f"📝 {summary}")
+        lines.append("") # Add a blank line
+
+    # Include vibes if they exist
+    vibes = (event.get("vibes") or "").strip()
+    if vibes:
+        lines.append(f"✨ Vibes: {vibes}")
+        # lines.append("") # Optional blank line after vibes
+
+    # Include venue URL if it exists and is valid
+    url = (event.get("venue_url") or "").strip()
     if url and (url.startswith("http://") or url.startswith("https://")):
-        lines.append(f"More info: {url}")
-    # Optional: Add a link back to the bot? e.g. f"Found via @YourBotUsername"
-    return "\n".join(lines)
+        lines.append(f"🔗 Link: {url}")
+
+    # Join lines, ensuring no leading/trailing whitespace on the final string
+    return "\n".join(lines).strip()
+
 
 def edit_telegram_message(chat_id: str, message_id: int, text: str, reply_markup: ta.Optional[ta.Dict[str, ta.Any]] = None) -> bool:
     """Edit an existing message."""
@@ -482,28 +503,10 @@ def create_event_keyboard(
 
     # 5. Forward Button
     try:
-        # Generate the standard message text (collapsed view, no location needed here)
-        # Pass only the single event to format
-        forward_message_text = format_events_message(
-            events=[event],
-            show_details=False  # Use collapsed view for forwarding text
-            # Note: distance won't be included unless we pass user loc here
-        )
-
-        # Add prefix if username is set
-        prefix = f"@{BOT_USERNAME}\n\n" if BOT_USERNAME else "Check out this event:\n\n"
-        full_forward_text = prefix + forward_message_text
-
-        # Optional: Truncate if too long (Telegram might have limits)
-        max_switch_inline_len = 250  # Arbitrary limit, adjust as needed
-        if len(full_forward_text) > max_switch_inline_len:
-            full_forward_text = full_forward_text[:max_switch_inline_len] + "..."
-
-        if full_forward_text:  # Ensure text exists
-            button_row.append({"text": "📤", "switch_inline_query": full_forward_text})
-
+        forward_text: str = format_event_for_forwarding(event)
+        button_row.append({"text": "📤", "switch_inline_query": forward_text or "Check out this event!"})
     except Exception as e:
-        logger.error(f"Error creating forward button text: {e}")
+        logger.error(f"Error formatting event for forwarding: {e}")
 
     # --- Construct Keyboard ---
     if button_row:
