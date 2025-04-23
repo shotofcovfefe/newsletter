@@ -799,7 +799,7 @@ def process_message(msg: ta.Dict[str, ta.Any]) -> None:
     text_lower: str = text_raw.lower()
     logger.info(f"Processing message from chat {chat_id} (user: {user_id}): '{text_raw}'")
     upsert_chat_info(chat_id, chat_type, user_info)
-    help_text = ( # Define help_text
+    help_text = (
         "Welcome to <b>Niche London</b> 👋\n\n"
         "We find local events happening across London!\n\n"
         "My commands:\n"
