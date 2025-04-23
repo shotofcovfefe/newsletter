@@ -64,6 +64,7 @@ help_text = (
 "/best - Our top picks  🏆\n"
 "/today - What's on today? 🔜\n"
 "/tomorrow - What's on tomorrow? 👣\n"
+"/weekend - What's on this weekend? 🎉\n"
 "/random - I'm feeling lucky 🍀\n"
 "/subscribe - Weekly roundup 📬\n"
 "/unsubscribe - Stop already! 🫗\n"
@@ -799,20 +800,7 @@ def process_message(msg: ta.Dict[str, ta.Any]) -> None:
     text_lower: str = text_raw.lower()
     logger.info(f"Processing message from chat {chat_id} (user: {user_id}): '{text_raw}'")
     upsert_chat_info(chat_id, chat_type, user_info)
-    help_text = (
-        "Welcome to <b>Niche London</b> 👋\n\n"
-        "We find local events happening across London!\n\n"
-        "My commands:\n"
-        "/local - Your closest events 🧭\n"
-        "/best - Our top picks  🏆\n"
-        "/today - What's on today? 🔜\n"
-        "/tomorrow - What's on tomorrow? 👣\n"
-        "/weekend - What's on this weekend? 🎉\n"
-        "/random - I'm feeling lucky 🍀\n"
-        "/updatelocation - Update map pinhead 📍\n"
-        "/help - Show this message\n\n"
-        "Or, send a London postcode (e.g., <i>E8 3PN</i>)!"
-    )
+
     # --- Command Routing ---
     if text_lower in ["/start", "/help", "help", "hello", "hi", "?"]: # Simple Commands
         awaiting_location_update[chat_id] = False
