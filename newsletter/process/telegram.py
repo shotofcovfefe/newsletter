@@ -269,13 +269,14 @@ def upsert_chat_info(chat_id: str, chat_type: str, user_info: ta.Dict[str, ta.An
             'p_username': user_info.get('username')
         }).execute()
 
-        if chat_type == 'private':
-            supabase.table("telegram_subscribers").upsert({
-                "chat_id": str(chat_id),
-                "subscribed_date": datetime.datetime.utcnow().isoformat()
-            }, on_conflict="chat_id").execute()
+        # if chat_type == 'private':
+        #     supabase.table("telegram_subscribers").upsert({
+        #         "chat_id": str(chat_id),
+        #         "subscribed_date": datetime.datetime.utcnow().isoformat()
+        #     }, on_conflict="chat_id").execute()
     except Exception as exc:
         logger.error(f"DB error updating chat/subscriber info for chat {chat_id}: {exc}", exc_info=True)
+
 
 def unsubscribe_user(chat_id: str) -> bool:
     """Unsubscribe user."""
@@ -497,7 +498,7 @@ def create_event_keyboard(
     if venue_name and venue_postcode:
         try:
             search_query: str = f"{venue_name}, {venue_postcode}"
-            maps_url: str = f"https://www.google.com/maps/search/?api=1&query=LATITUDE,LONGITUDE{urllib.parse.quote_plus(search_query)}" # Use HTTPS
+            maps_url: str = f"https://www.google.com/maps/search/?api=1&query={urllib.parse.quote_plus(search_query)}" # Use HTTPS
             button_row.append({"text": "📍", "url": maps_url})
         except Exception as e: logger.error(f"Error creating map link: {e}")
 
@@ -532,20 +533,36 @@ def get_user_location(chat_id: str) -> ta.Tuple[ta.Optional[str], ta.Optional[fl
 
 # --- Command/Callback Processing Helpers ---
 
+
 def handle_single_event_command(chat_id: str, command: str) -> None:
     """Handles commands that fetch and display a single event with refresh."""
-    is_location_based: bool = command in ["/local", "/today", "/tomorrow"]
-    is_random: bool = command == "/random"
-    is_best: bool = command == "/best" # Treated like random for now
+    # Map command to callback data, display context, and location requirement
+    command_config = {
+        "/local": {"cb": "load_local", "ctx": "nearby", "loc": True, "days": 7},
+        "/today": {"cb": "load_today", "ctx": "today", "loc": True, "days": 0},
+        "/tomorrow": {"cb": "load_tomorrow", "ctx": "tomorrow", "loc": True, "days": 1},
+        "/weekend": {"cb": "load_weekend", "ctx": "this weekend", "loc": True}, # Weekend specific
+        "/random": {"cb": "load_random", "ctx": "a random event", "loc": False},
+        "/best": {"cb": "load_best", "ctx": "a top pick", "loc": False},
+    }
+
+    config = command_config.get(command)
+    if not config:
+        logger.error(f"Invalid command passed to handle_single_event_command: {command}")
+        return # Should not happen if called via process_message map
+
+    callback_data: str = config["cb"]
+    time_period_context: str = config["ctx"]
+    is_location_based: bool = config["loc"]
 
     user_pc: ta.Optional[str] = None
     lat: ta.Optional[float] = None
     lon: ta.Optional[float] = None
     fetch_params: ta.Dict[str, ta.Any] = {}
-    callback_data: str = "" # This will store the 'load_...' type
-    time_period_context: str = ""
+    events: ta.List[ta.Dict[str, ta.Any]] = []
     no_event_context: str = ""
 
+    # --- Get Location if Required ---
     if is_location_based:
         user_pc, lat, lon = get_user_location(chat_id)
         if not user_pc: send_telegram_message(chat_id, LOCATION_PROMPT_MESSAGE); return
@@ -553,224 +570,184 @@ def handle_single_event_command(chat_id: str, command: str) -> None:
         fetch_params.update({"user_lat": lat, "user_lon": lon})
         no_event_context = f"near {user_pc.upper()}"
 
-    today_dt: datetime.datetime = datetime.datetime.utcnow()
-    today_str: str = today_dt.strftime("%Y-%m-%d")
+    # --- Calculate Date Range and Fetch Events ---
+    try:
+        today_dt: datetime.datetime = datetime.datetime.utcnow()
+        today_date: datetime.date = today_dt.date()
 
-    # --- Determine fetch params and context based on command ---
-    if command == "/local":
-        fetch_params["date_from"] = today_str
-        fetch_params["date_to"] = (today_dt + datetime.timedelta(days=7)).strftime("%Y-%m-%d")
-        callback_data = "load_local"
-        time_period_context = "nearby"
-        no_event_context = f"in the next 7 days {no_event_context}".strip()
-    elif command == "/today":
-        fetch_params["date_from"] = today_str
-        fetch_params["date_to"] = today_str
-        callback_data = "load_today"
-        time_period_context = "today"
-        no_event_context = f"today {no_event_context}".strip()
-    elif command == "/tomorrow":
-        tomorrow_dt: datetime.datetime = today_dt + datetime.timedelta(days=1)
-        tomorrow_str: str = tomorrow_dt.strftime("%Y-%m-%d")
-        fetch_params["date_from"] = tomorrow_str
-        fetch_params["date_to"] = tomorrow_str
-        callback_data = "load_tomorrow"
-        time_period_context = "tomorrow"
-        no_event_context = f"tomorrow {no_event_context}".strip()
-    elif is_random or is_best:
-        events: ta.List[ta.Dict[str, ta.Any]] = fetch_random_events(days_ahead=DEFAULT_RANDOM_DAYS_AHEAD, limit=1)
-        callback_data = "load_random" if is_random else "load_best"
-        time_period_context = "a random event" if is_random else "a top pick"
-        no_event_context = "randomly" if is_random else "as a top pick"
-        # --- Send random/best event ---
-        if events:
-            event: ta.Dict[str, ta.Any] = events[0]
-            user_pc_rand, lat_rand, lon_rand = get_user_location(chat_id)
-            if lat_rand is not None and lon_rand is not None:
-                 try: # Add distance if possible
-                    ev_lat = float(event.get("latitude", math.nan))
-                    ev_lon = float(event.get("longitude", math.nan))
-                    if not math.isnan(ev_lat) and not math.isnan(ev_lon):
-                        event["distance_km"] = haversine_distance(lat_rand, lon_rand, ev_lat, ev_lon)
-                 except (ValueError, TypeError): pass
-            # First time sending, cannot go back
-            keyboard: ta.Optional[ta.Dict[str, ta.Any]] = create_event_keyboard(event, callback_data, can_go_back=False)
-            message_text: str = format_events_message(events=[event], postcode=user_pc_rand, user_lat=lat_rand, user_lon=lon_rand, time_period=time_period_context)
-            sent_message_data = send_telegram_message(chat_id, message_text, reply_markup=keyboard)
+        if command == "/weekend":
+            # Calculate upcoming Saturday and Monday (for range end)
+            today_weekday = today_date.weekday() # Monday is 0, Sunday is 6
+            days_until_saturday = (5 - today_weekday + 7) % 7
+            saturday_date = today_date + datetime.timedelta(days=days_until_saturday)
+            monday_date = saturday_date + datetime.timedelta(days=2) # End date is exclusive
 
-            # --- Initialize History ---
-            if sent_message_data and isinstance(sent_message_data, dict) and (msg_id := sent_message_data.get('message_id')):
-                history_key = (str(chat_id), msg_id)
-                message_event_history[history_key] = deque([event], maxlen=HISTORY_SIZE)
-                message_context_type[history_key] = callback_data # Store context type
-                logger.info(f"Initialized history for msg {msg_id} in chat {chat_id} with event {event.get('event_id')}")
-            else:
-                 logger.error(f"Failed to get message_id after sending {command} message to {chat_id}")
-        else: send_telegram_message(chat_id, f"Sorry, couldn't find any events {no_event_context} right now.")
-        return # Exit
+            fetch_params["date_from"] = saturday_date.strftime("%Y-%m-%d")
+            fetch_params["date_to"] = monday_date.strftime("%Y-%m-%d")
+            no_event_context = f"this weekend {no_event_context}".strip()
+            events = fetch_events(overall_limit=1, **fetch_params)
 
-    # --- Fetch and Send location-based event ---
-    events = fetch_events(overall_limit=1, **fetch_params)
-    if events:
-        event = events[0]
-        # First time sending, cannot go back
-        keyboard = create_event_keyboard(event, callback_data, can_go_back=False)
-        message_text = format_events_message(events=[event], postcode=user_pc, user_lat=lat, user_lon=lon, time_period=time_period_context)
-        sent_message_data = send_telegram_message(chat_id, message_text, reply_markup=keyboard)
+        elif command in ["/local", "/today", "/tomorrow"]:
+            days_offset = config.get("days", 0)
+            start_date = today_date + datetime.timedelta(days=days_offset)
+            if command == "/local": # Special case for 7-day range
+                end_date = start_date + datetime.timedelta(days=7)
+                no_event_context = f"in the next 7 days {no_event_context}".strip()
+            else: # Today or Tomorrow
+                end_date = start_date + datetime.timedelta(days=1)
+                no_event_context = f"{time_period_context} {no_event_context}".strip()
 
-        # --- Initialize History ---
-        if sent_message_data and isinstance(sent_message_data, dict) and (msg_id := sent_message_data.get('message_id')):
+            fetch_params["date_from"] = start_date.strftime("%Y-%m-%d")
+            fetch_params["date_to"] = end_date.strftime("%Y-%m-%d")
+            events = fetch_events(overall_limit=1, **fetch_params)
+
+        elif command in ["/random", "/best"]:
+            events = fetch_random_events(days_ahead=DEFAULT_RANDOM_DAYS_AHEAD, limit=1)
+            no_event_context = "matching that criteria" # Generic
+
+        # --- Process fetched events ---
+        event: ta.Optional[ta.Dict[str, ta.Any]] = events[0] if events else None
+
+        if not event:
+            send_telegram_message(chat_id, NO_EVENTS_MESSAGE.format(context=no_event_context, postcode=user_pc.upper() if user_pc else "your area"))
+            return
+
+        # Add distance if user location known
+        user_pc_dist, lat_dist, lon_dist = get_user_location(chat_id)
+        if lat_dist is not None and lon_dist is not None:
+             try:
+                 ev_lat = float(event.get("latitude", math.nan)); ev_lon = float(event.get("longitude", math.nan))
+                 if not math.isnan(ev_lat) and not math.isnan(ev_lon): event["distance_km"] = haversine_distance(lat_dist, lon_dist, ev_lat, ev_lon)
+             except: pass
+
+    except Exception as e:
+        logger.error(f"Error fetching event for command {command}: {e}", exc_info=True)
+        send_telegram_message(chat_id, DEFAULT_ERROR_MESSAGE); return
+
+    # --- Send the event message ---
+    try:
+        keyboard = create_event_keyboard(event, callback_data, can_go_back=False, is_currently_expanded=False)
+        message_text = format_events_message(
+            events=[event], time_period=time_period_context,
+            postcode=user_pc, user_lat=lat, user_lon=lon, show_details=False
+        )
+        # Use helper to get message_id for history
+        sent_message_api_response = _telegram_api_request("sendMessage", {
+             "chat_id": str(chat_id), "text": message_text, "parse_mode": "HTML",
+             "disable_web_page_preview": True, "reply_markup": json.dumps(keyboard if keyboard else {})
+         })
+        # Initialize History
+        if sent_message_api_response and isinstance(sent_message_api_response.get("result"), dict) and (msg_id := sent_message_api_response["result"].get('message_id')):
             history_key = (str(chat_id), msg_id)
-            message_event_history[history_key] = deque([event], maxlen=HISTORY_SIZE)
-            message_context_type[history_key] = callback_data # Store context type
+            message_event_history[history_key] = deque([event.copy()], maxlen=HISTORY_SIZE)
+            message_context_type[history_key] = callback_data
             logger.info(f"Initialized history for msg {msg_id} in chat {chat_id} with event {event.get('event_id')}")
-        else:
-            logger.error(f"Failed to get message_id after sending {command} message to {chat_id}")
-    else: send_telegram_message(chat_id, NO_EVENTS_MESSAGE.format(context=no_event_context, postcode=user_pc.upper() if user_pc else ""))
+        else: logger.error(f"Failed to get message_id after sending {command} command to {chat_id}. API Response: {sent_message_api_response}")
+    except Exception as e:
+        logger.error(f"Error formatting/sending event for command {command}: {e}", exc_info=True)
+        send_telegram_message(chat_id, DEFAULT_ERROR_MESSAGE)
 
 
-# Full function provided again for clarity
-# Full function provided again for clarity
 def handle_refresh_callback(chat_id: str, message_id: int, callback_data: str) -> None:
     """Handles all refresh callback queries (load_...). Updates history."""
     # --- Initial Setup ---
     fetch_params: ta.Dict[str, ta.Any] = {}
-    user_pc: ta.Optional[str] = None
-    lat: ta.Optional[float] = None
-    lon: ta.Optional[float] = None
-    fetch_limit: int = DEFAULT_EVENT_FETCH_LIMIT # Assumes constant is defined
-    is_location_based: bool = callback_data in ["load_local", "load_today", "load_tomorrow"]
-    is_random: bool = callback_data == "load_random"
-    is_best: bool = callback_data == "load_best" # Treated like random
-    time_period_context: str = ""
-    no_event_context: str = ""
-    event_to_show: ta.Optional[ta.Dict[str, ta.Any]] = None # The event we'll display
-    fetched_events: ta.List[ta.Dict[str, ta.Any]] = [] # Initialize
+    user_pc: ta.Optional[str] = None; lat: ta.Optional[float] = None; lon: ta.Optional[float] = None
+    fetch_limit: int = DEFAULT_EVENT_FETCH_LIMIT
+    # Determine command type from callback data
+    is_location_based: bool = callback_data in ["load_local", "load_today", "load_tomorrow", "load_weekend"] # ADDED load_weekend
+    is_random: bool = callback_data == "load_random"; is_best: bool = callback_data == "load_best"
+    time_period_context: str = ""; no_event_context: str = ""
+    event_to_show: ta.Optional[ta.Dict[str, ta.Any]] = None; fetched_events: ta.List[ta.Dict[str, ta.Any]] = []
 
     # --- Get Location if Needed ---
     if is_location_based:
-        user_pc, lat, lon = get_user_location(chat_id) # Assumes this helper exists
-        if not user_pc:
-            edit_telegram_message(chat_id, message_id, LOCATION_PROMPT_MESSAGE, reply_markup=None) # Assumes constant exists
-            return
-        if lat is None or lon is None:
-            edit_telegram_message(chat_id, message_id, GEOCODE_ERROR_MESSAGE.format(postcode=user_pc), reply_markup=None) # Assumes constant exists
-            return
-        fetch_params.update({"user_lat": lat, "user_lon": lon})
-        no_event_context = f"near {user_pc.upper()}"
+        user_pc, lat, lon = get_user_location(chat_id)
+        if not user_pc: edit_telegram_message(chat_id, message_id, LOCATION_PROMPT_MESSAGE, None); return
+        if lat is None or lon is None: edit_telegram_message(chat_id, message_id, GEOCODE_ERROR_MESSAGE.format(postcode=user_pc), None); return
+        fetch_params.update({"user_lat": lat, "user_lon": lon}); no_event_context = f"near {user_pc.upper()}"
 
     # --- Determine Fetch Dates/Context ---
     today_dt: datetime.datetime = datetime.datetime.utcnow()
-    today_str: str = today_dt.strftime("%Y-%m-%d")
+    today_date: datetime.date = today_dt.date() # Use only date part for calculations
 
     if callback_data == "load_local":
-        fetch_params["date_from"] = today_str
-        fetch_params["date_to"] = (today_dt + datetime.timedelta(days=7)).strftime("%Y-%m-%d")
-        time_period_context = "nearby"
-        no_event_context = f"in the next 7 days {no_event_context}".strip()
+        fetch_params["date_from"] = today_date.strftime("%Y-%m-%d")
+        fetch_params["date_to"] = (today_date + datetime.timedelta(days=7)).strftime("%Y-%m-%d")
+        time_period_context = "nearby"; no_event_context = f"in the next 7 days {no_event_context}".strip()
     elif callback_data == "load_today":
-        fetch_params["date_from"] = today_str
-        fetch_params["date_to"] = today_str
-        time_period_context = "today"
-        no_event_context = f"today {no_event_context}".strip()
+        fetch_params["date_from"] = today_date.strftime("%Y-%m-%d")
+        fetch_params["date_to"] = today_date.strftime("%Y-%m-%d") # Date range is just today
+        time_period_context = "today"; no_event_context = f"today {no_event_context}".strip()
     elif callback_data == "load_tomorrow":
-        tomorrow_dt: datetime.datetime = today_dt + datetime.timedelta(days=1)
-        tomorrow_str: str = tomorrow_dt.strftime("%Y-%m-%d")
-        fetch_params["date_from"] = tomorrow_str
-        fetch_params["date_to"] = tomorrow_str
-        time_period_context = "tomorrow"
-        no_event_context = f"tomorrow {no_event_context}".strip()
-    # Note: No specific date params set here for random/best, handled below
+        tomorrow_date = today_date + datetime.timedelta(days=1)
+        fetch_params["date_from"] = tomorrow_date.strftime("%Y-%m-%d")
+        fetch_params["date_to"] = tomorrow_date.strftime("%Y-%m-%d") # Date range is just tomorrow
+        time_period_context = "tomorrow"; no_event_context = f"tomorrow {no_event_context}".strip()
+    # --- ADDED: Weekend Logic ---
+    elif callback_data == "load_weekend":
+        today_weekday = today_date.weekday() # Monday is 0, Sunday is 6
+        days_until_saturday = (5 - today_weekday + 7) % 7
+        saturday_date = today_date + datetime.timedelta(days=days_until_saturday)
+        monday_date = saturday_date + datetime.timedelta(days=2) # End date is exclusive
+        fetch_params["date_from"] = saturday_date.strftime("%Y-%m-%d")
+        fetch_params["date_to"] = monday_date.strftime("%Y-%m-%d")
+        time_period_context = "this weekend"; no_event_context = f"this weekend {no_event_context}".strip()
+    # --- END Weekend Logic ---
 
     # --- Fetch event(s) ---
     if is_random or is_best:
-        fetched_events = fetch_random_events(days_ahead=DEFAULT_RANDOM_DAYS_AHEAD, limit=1) # Assumes this helper exists
-        time_period_context = "a random event" if is_random else "a top pick"
-        no_event_context = "randomly" if is_random else "as a top pick"
+        # Fetch more for random/best to allow choosing a different one
+        fetched_events = fetch_random_events(days_ahead=DEFAULT_RANDOM_DAYS_AHEAD, limit=fetch_limit)
+        time_period_context = "a random event" if is_random else "a top pick"; no_event_context = "randomly" if is_random else "as a top pick"
     elif is_location_based:
-        fetched_events = fetch_events(overall_limit=fetch_limit, **fetch_params) # Assumes this helper exists
-    else:
-         logger.error(f"Unhandled callback type in refresh handler: {callback_data}")
-         return
+        fetched_events = fetch_events(overall_limit=fetch_limit, **fetch_params)
+    else: logger.error(f"Unhandled callback type in refresh handler: {callback_data}"); return
 
-    # --- Select Event to Show ---
-    # Attempt to select an event DIFFERENT from the last one shown, if possible
-    history_key_for_select = (chat_id, message_id)
-    history = message_event_history.get(history_key_for_select)
+    # --- Select Event to Show (Try not to repeat) ---
+    history_key = (chat_id, message_id) # Define history key here
+    history = message_event_history.get(history_key)
     last_event_id = history[-1].get('event_id') if history else None
-
     if fetched_events:
-         if len(fetched_events) > 1 and last_event_id:
-             # Try find a different event
-             different_events = [e for e in fetched_events if e.get('event_id') != last_event_id]
-             if different_events:
-                 event_to_show = random.choice(different_events)
-                 logger.info(f"Refresh for msg {message_id}: Chose different event {event_to_show.get('event_id', 'N/A')} from {len(different_events)} options.")
-             else: # All fetched events are the same as the last one
-                 event_to_show = fetched_events[0]
-                 logger.info(f"Refresh for msg {message_id}: Only found same event {event_to_show.get('event_id', 'N/A')}.")
-         elif fetched_events: # Only one event fetched, or no history
+         # Filter out the last shown event if possible and multiple options exist
+         potential_events = [e for e in fetched_events if e.get('event_id') != last_event_id]
+         if potential_events: # If filtering left any events
+             event_to_show = random.choice(potential_events)
+             logger.info(f"Refresh for msg {message_id}: Chose different event {event_to_show.get('event_id', 'N/A')} from {len(potential_events)} options.")
+         else: # All fetched events were the same as last shown, or only one fetched
              event_to_show = fetched_events[0]
-             logger.info(f"Refresh for msg {message_id}: Selected event {event_to_show.get('event_id', 'N/A')}")
-         # else event_to_show remains None if fetched_events was empty initially
-
+             logger.info(f"Refresh for msg {message_id}: Re-showing event {event_to_show.get('event_id', 'N/A')} or only one option found.")
+    logger.debug(f"Refresh selected event: {event_to_show.get('event_id') if event_to_show else 'None'}") # Debug log
 
     # --- Update message or show 'no events' ---
     if event_to_show:
-        # Get user location again for distance calculation if needed
+        # Get location info again for formatting distance
         user_pc_refresh, lat_refresh, lon_refresh = (user_pc, lat, lon) if is_location_based else get_user_location(chat_id)
-
+        # Add distance if possible
         if lat_refresh is not None and lon_refresh is not None:
-            try: # Add/update distance if possible
-                ev_lat = float(event_to_show.get("latitude", math.nan))
-                ev_lon = float(event_to_show.get("longitude", math.nan))
-                if not math.isnan(ev_lat) and not math.isnan(ev_lon):
-                    event_to_show["distance_km"] = haversine_distance(lat_refresh, lon_refresh, ev_lat, ev_lon)
-            except (ValueError, TypeError): pass
-
-        # --- Update History BEFORE editing ---
-        history_key = (chat_id, message_id)
-        if history_key not in message_event_history:
-             message_event_history[history_key] = deque(maxlen=HISTORY_SIZE)
-             logger.warning(f"Initialized missing history for msg {message_id} during refresh.")
-        # Store a copy to avoid modifying the history reference later
+            try:
+                ev_lat=float(event_to_show.get("latitude",math.nan)); ev_lon=float(event_to_show.get("longitude",math.nan))
+                if not math.isnan(ev_lat) and not math.isnan(ev_lon): event_to_show["distance_km"] = haversine_distance(lat_refresh, lon_refresh, ev_lat, ev_lon)
+            except: pass
+        # Update History
+        if history_key not in message_event_history: message_event_history[history_key] = deque(maxlen=HISTORY_SIZE)
         message_event_history[history_key].append(event_to_show.copy())
-        if history_key not in message_context_type:
-             # Persist original context type if missing (should normally exist)
-             message_context_type[history_key] = callback_data
-             logger.warning(f"Initialized missing context '{callback_data}' for msg {message_id} during refresh.")
+        if history_key not in message_context_type: message_context_type[history_key] = callback_data # Store original context
         current_history_len = len(message_event_history[history_key])
         logger.info(f"Appended history for msg {message_id}. New len: {current_history_len}")
-
-        # --- Format and Edit ---
-        can_go_back: bool = current_history_len > 1
-        # ***** FIX 1: Call create_event_keyboard with expanded=False *****
-        keyboard: ta.Optional[ta.Dict[str, ta.Any]] = create_event_keyboard(
-            event=event_to_show,
-            refresh_callback_data=callback_data, # Use the current callback for refresh
-            can_go_back=can_go_back,
-            is_currently_expanded=False # Refresh always resets to collapsed view
+        # Format and Edit
+        can_go_back = current_history_len > 1
+        keyboard = create_event_keyboard( event_to_show, callback_data, can_go_back, is_currently_expanded=False ) # Reset to collapsed view
+        message_text = format_events_message(
+            events=[event_to_show], postcode=user_pc_refresh, user_lat=lat_refresh, user_lon=lon_refresh,
+            time_period=time_period_context, show_details=False # Reset to collapsed view
         )
-        # ***** FIX 2: Call format_events_message with expanded=False *****
-        message_text: str = format_events_message(
-            events=[event_to_show],
-            postcode=user_pc_refresh,
-            user_lat=lat_refresh,
-            user_lon=lon_refresh,
-            time_period=time_period_context,
-            show_full_description=False # Refresh always resets to collapsed view
-        )
-        logger.info(f"Attempting to edit msg {message_id} for refresh callback {callback_data}")
         if not edit_telegram_message(chat_id, message_id, message_text, reply_markup=keyboard):
             logger.error(f"Edit failed for refresh callback {callback_data} on msg {message_id}")
-            # Consider removing the event just added to history if edit fails?
-            # if history_key in message_event_history: message_event_history[history_key].pop()
-
-    else:
-        # No event found at all by the fetch
-        logger.info(f"No events found for refresh callback {callback_data} on msg {message_id}")
+    else: # No event found
         final_no_event_msg = NO_EVENTS_MESSAGE.format(context=f"further {no_event_context}", postcode=user_pc.upper() if user_pc else "your area")
-        edit_telegram_message(chat_id, message_id, final_no_event_msg, reply_markup=None) # Remove keyboard
+        edit_telegram_message(chat_id, message_id, final_no_event_msg, reply_markup=None)
+
 
 # ---------------------------------------------------------------------
 # Send Individual Event Messages (Used by postcode search etc.)
@@ -830,6 +807,7 @@ def process_message(msg: ta.Dict[str, ta.Any]) -> None:
         "/best - Our top picks  🏆\n"
         "/today - What's on today? 🔜\n"
         "/tomorrow - What's on tomorrow? 👣\n"
+        "/weekend - What's on this weekend? 🎉\n"
         "/random - I'm feeling lucky 🍀\n"
         "/updatelocation - Update map pinhead 📍\n"
         "/help - Show this message\n\n"
@@ -842,13 +820,43 @@ def process_message(msg: ta.Dict[str, ta.Any]) -> None:
     if text_lower == "/updatelocation":
         awaiting_location_update[chat_id] = True
         send_telegram_message(chat_id, "OK. Please send me your London postcode (e.g., SW1A 0AA)."); return
-    # ... (subscribe/unsubscribe if needed) ...
+    elif text_lower == "/subscribe":
+        if chat_type == 'private':
+            awaiting_location_update[chat_id] = False
+            logger.info(f"Processing /subscribe for chat {chat_id}")
+            try:
+                # Explicitly add user to subscribers table on command
+                supabase.table("telegram_subscribers").upsert({
+                    "chat_id": str(chat_id),
+                    "subscribed_date": datetime.datetime.utcnow().isoformat()
+                }, on_conflict="chat_id").execute()
+                # Send confirmation ONLY on success
+                send_telegram_message(chat_id, "✅ You've subscribed to the weekly roundup!")
+            except Exception as e:
+                logger.error(f"Error subscribing chat {chat_id}: {e}", exc_info=True)
+                send_telegram_message(chat_id, "⚠️ Sorry, there was an error trying to subscribe you.")
+        else:
+            # Ignore /subscribe command in group chats
+            send_telegram_message(chat_id, "Subscription commands only work in a private chat with me.")
+        return
+    elif text_lower == "/unsubscribe":
+        if chat_type == 'private': # Only works in private chat
+            awaiting_location_update[chat_id] = False
+            # Calls the helper function to perform the action
+            if unsubscribe_user(chat_id):
+                send_telegram_message(chat_id, "You've been unsubscribed from the weekly roundup.") # Success feedback
+            else:
+                send_telegram_message(chat_id, "Sorry, there was an error trying to unsubscribe.") # Error feedback
+        else:
+            send_telegram_message(chat_id, "Subscription commands only work in a private chat with me.")
+        return # Stop further processing
 
     # --- Single Event Commands ---
     single_event_command_map = {
         "/local": ("load_local", "nearby", True),
         "/today": ("load_today", "today", True),
         "/tomorrow": ("load_tomorrow", "tomorrow", True),
+        "/weekend": ("load_weekend", "this weekend", True),
         "/random": ("load_random", "a random event", False),
         "/best": ("load_best", "a top pick", False),
     }
