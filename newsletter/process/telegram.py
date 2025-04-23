@@ -29,6 +29,7 @@ logger.setLevel(logging.INFO) # Explicitly set level for this logger
 SUPABASE_URL: ta.Optional[str] = os.getenv("SUPABASE_URL")
 SUPABASE_KEY: ta.Optional[str] = os.getenv("SUPABASE_KEY")
 TELEGRAM_BOT_TOKEN: ta.Optional[str] = os.getenv("TELEGRAM_BOT_TOKEN")
+BOT_USERNAME: str = "niche_london"
 
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
@@ -481,10 +482,28 @@ def create_event_keyboard(
 
     # 5. Forward Button
     try:
-        forward_text: str = format_event_for_forwarding(event)
-        button_row.append({"text": "📤", "switch_inline_query": forward_text or "Check out this event!"})
+        # Generate the standard message text (collapsed view, no location needed here)
+        # Pass only the single event to format
+        forward_message_text = format_events_message(
+            events=[event],
+            show_details=False  # Use collapsed view for forwarding text
+            # Note: distance won't be included unless we pass user loc here
+        )
+
+        # Add prefix if username is set
+        prefix = f"@{BOT_USERNAME}\n\n" if BOT_USERNAME else "Check out this event:\n\n"
+        full_forward_text = prefix + forward_message_text
+
+        # Optional: Truncate if too long (Telegram might have limits)
+        max_switch_inline_len = 250  # Arbitrary limit, adjust as needed
+        if len(full_forward_text) > max_switch_inline_len:
+            full_forward_text = full_forward_text[:max_switch_inline_len] + "..."
+
+        if full_forward_text:  # Ensure text exists
+            button_row.append({"text": "📤", "switch_inline_query": full_forward_text})
+
     except Exception as e:
-        logger.error(f"Error formatting event for forwarding: {e}")
+        logger.error(f"Error creating forward button text: {e}")
 
     # --- Construct Keyboard ---
     if button_row:
