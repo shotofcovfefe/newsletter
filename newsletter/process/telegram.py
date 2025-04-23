@@ -603,6 +603,7 @@ def handle_single_event_command(chat_id: str, command: str) -> None:
 
 
 # Full function provided again for clarity
+# Full function provided again for clarity
 def handle_refresh_callback(chat_id: str, message_id: int, callback_data: str) -> None:
     """Handles all refresh callback queries (load_...). Updates history."""
     # --- Initial Setup ---
@@ -666,15 +667,26 @@ def handle_refresh_callback(chat_id: str, message_id: int, callback_data: str) -
          return
 
     # --- Select Event to Show ---
-    # SIMPLIFICATION: Just take the first event found, or a random one if multiple were fetched for location.
+    # Attempt to select an event DIFFERENT from the last one shown, if possible
+    history_key_for_select = (chat_id, message_id)
+    history = message_event_history.get(history_key_for_select)
+    last_event_id = history[-1].get('event_id') if history else None
+
     if fetched_events:
-        if is_location_based and len(fetched_events) > 1:
-            event_to_show = random.choice(fetched_events) # Pick randomly from the fetched pool
-            logger.info(f"Refresh for msg {message_id}: Chose random event {event_to_show.get('event_id', 'N/A')} from {len(fetched_events)} fetched.")
-        else:
-            event_to_show = fetched_events[0] # Take the first (or only) one
-            logger.info(f"Refresh for msg {message_id}: Selected event {event_to_show.get('event_id', 'N/A')}")
-    # else: event_to_show remains None
+         if len(fetched_events) > 1 and last_event_id:
+             # Try find a different event
+             different_events = [e for e in fetched_events if e.get('event_id') != last_event_id]
+             if different_events:
+                 event_to_show = random.choice(different_events)
+                 logger.info(f"Refresh for msg {message_id}: Chose different event {event_to_show.get('event_id', 'N/A')} from {len(different_events)} options.")
+             else: # All fetched events are the same as the last one
+                 event_to_show = fetched_events[0]
+                 logger.info(f"Refresh for msg {message_id}: Only found same event {event_to_show.get('event_id', 'N/A')}.")
+         elif fetched_events: # Only one event fetched, or no history
+             event_to_show = fetched_events[0]
+             logger.info(f"Refresh for msg {message_id}: Selected event {event_to_show.get('event_id', 'N/A')}")
+         # else event_to_show remains None if fetched_events was empty initially
+
 
     # --- Update message or show 'no events' ---
     if event_to_show:
@@ -690,14 +702,14 @@ def handle_refresh_callback(chat_id: str, message_id: int, callback_data: str) -
             except (ValueError, TypeError): pass
 
         # --- Update History BEFORE editing ---
-        # Consider moving this AFTER successful edit to avoid state mismatch?
-        # Let's keep it here for now, simpler flow, accept mismatch risk.
         history_key = (chat_id, message_id)
         if history_key not in message_event_history:
              message_event_history[history_key] = deque(maxlen=HISTORY_SIZE)
              logger.warning(f"Initialized missing history for msg {message_id} during refresh.")
+        # Store a copy to avoid modifying the history reference later
         message_event_history[history_key].append(event_to_show.copy())
         if history_key not in message_context_type:
+             # Persist original context type if missing (should normally exist)
              message_context_type[history_key] = callback_data
              logger.warning(f"Initialized missing context '{callback_data}' for msg {message_id} during refresh.")
         current_history_len = len(message_event_history[history_key])
@@ -705,22 +717,33 @@ def handle_refresh_callback(chat_id: str, message_id: int, callback_data: str) -
 
         # --- Format and Edit ---
         can_go_back: bool = current_history_len > 1
-        keyboard: ta.Optional[ta.Dict[str, ta.Any]] = create_event_keyboard(event_to_show, callback_data, can_go_back=can_go_back)
+        # ***** FIX 1: Call create_event_keyboard with expanded=False *****
+        keyboard: ta.Optional[ta.Dict[str, ta.Any]] = create_event_keyboard(
+            event=event_to_show,
+            refresh_callback_data=callback_data, # Use the current callback for refresh
+            can_go_back=can_go_back,
+            is_currently_expanded=False # Refresh always resets to collapsed view
+        )
+        # ***** FIX 2: Call format_events_message with expanded=False *****
         message_text: str = format_events_message(
             events=[event_to_show],
             postcode=user_pc_refresh,
             user_lat=lat_refresh,
             user_lon=lon_refresh,
-            time_period=time_period_context
+            time_period=time_period_context,
+            show_full_description=False # Refresh always resets to collapsed view
         )
         logger.info(f"Attempting to edit msg {message_id} for refresh callback {callback_data}")
         if not edit_telegram_message(chat_id, message_id, message_text, reply_markup=keyboard):
             logger.error(f"Edit failed for refresh callback {callback_data} on msg {message_id}")
+            # Consider removing the event just added to history if edit fails?
+            # if history_key in message_event_history: message_event_history[history_key].pop()
+
     else:
         # No event found at all by the fetch
         logger.info(f"No events found for refresh callback {callback_data} on msg {message_id}")
-        final_no_event_msg = NO_EVENTS_MESSAGE.format(context=no_event_context, postcode=user_pc.upper() if user_pc else "your area")
-        edit_telegram_message(chat_id, message_id, final_no_event_msg, reply_markup=None)
+        final_no_event_msg = NO_EVENTS_MESSAGE.format(context=f"further {no_event_context}", postcode=user_pc.upper() if user_pc else "your area")
+        edit_telegram_message(chat_id, message_id, final_no_event_msg, reply_markup=None) # Remove keyboard
 
 # ---------------------------------------------------------------------
 # Send Individual Event Messages (Used by postcode search etc.)
