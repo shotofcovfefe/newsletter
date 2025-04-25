@@ -7,6 +7,8 @@ import json
 import math
 import random
 import urllib.parse
+from zoneinfo import ZoneInfo
+
 import requests
 import typing as ta
 from supabase import create_client, Client
@@ -30,6 +32,7 @@ SUPABASE_URL: ta.Optional[str] = os.getenv("SUPABASE_URL")
 SUPABASE_KEY: ta.Optional[str] = os.getenv("SUPABASE_KEY")
 TELEGRAM_BOT_TOKEN: ta.Optional[str] = os.getenv("TELEGRAM_BOT_TOKEN")
 
+SLEEP_TIME_LENGTH: float = 0.2
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
@@ -57,21 +60,27 @@ GEOCODE_ERROR_MESSAGE: str = "Sorry, couldn't find coordinates for your location
 NO_EVENTS_MESSAGE: str = "Couldn't find any events {context} near {postcode}."
 DEFAULT_ERROR_MESSAGE: str = "Sorry, something went wrong processing your request."
 
-help_text = (
+help_text_header = (
 "Welcome to <b>Niche London</b> 👋\n\n"
 "We find local events happening across London!\n\n"
-"My commands:\n"
-"/local - Your closest events 🧭\n"
-"/best - Our top picks  🏆\n"
-"/today - What's on today? 🔜\n"
-"/tomorrow - What's on tomorrow? 👣\n"
+)
+
+
+help_text_commands = (
+"Here are my commands:\n"
 "/weekend - What's on this weekend? 🎉\n"
+"/tomorrow - What's on tomorrow? 👣\n"
+"/today - What's on today? 🔜\n"
+"/local - What's on nearby? 🧭\n"
+"/best - Our top picks  🏆\n"
 "/random - I'm feeling lucky 🍀\n"
 "/subscribe - Weekly roundup 📬\n"
 "/unsubscribe - Stop already! 🫗\n"
-"/updatelocation - Update map pinhead 📍\n"
-"Or, send a London postcode (e.g., <i>E8 3PN</i>)!"
+"/updatelocation - Update map pinhead 📍\n\n"
+"Or! Send a London postcode (e.g., <i>E8 3PN</i>)!"
 )
+
+help_text = help_text_header + help_text_commands
 
 
 # --- Telegram API Helpers ---
@@ -150,7 +159,7 @@ def send_telegram_message(chat_id: str, text: str, reply_markup: ta.Optional[ta.
 
         # Small delay between parts if splitting
         if len(parts) > 1 and not is_last_part:
-            time.sleep(0.2)
+            time.sleep(SLEEP_TIME_LENGTH)
 
     # Return the response data of the last part IF the overall operation seems successful
     # Modify the condition based on desired behavior if parts fail.
@@ -158,6 +167,7 @@ def send_telegram_message(chat_id: str, text: str, reply_markup: ta.Optional[ta.
     # If the *last* part failed, last_part_response_data will be None.
     # If overall_success is required, use: return last_part_response_data if overall_success else None
     return last_part_response_data if overall_success else None
+
 
 def format_event_for_forwarding(event: ta.Dict[str, ta.Any]) -> str:
     """Creates a nicer plain text summary of an event suitable for forwarding."""
@@ -611,7 +621,23 @@ def handle_single_event_command(chat_id: str, command: str) -> None:
         event: ta.Optional[ta.Dict[str, ta.Any]] = events[0] if events else None
 
         if not event:
-            send_telegram_message(chat_id, NO_EVENTS_MESSAGE.format(context=no_event_context, postcode=user_pc.upper() if user_pc else "your area"))
+            base_msg = NO_EVENTS_MESSAGE.format(
+                context=no_event_context,
+                postcode=user_pc.upper() if user_pc else "your area"
+            )
+            suggestion = ""
+            if command == "/today":
+                suggestion = "\nMaybe try /tomorrow or /weekend?"
+            elif command == "/tomorrow":
+                suggestion = "\nMaybe try /weekend or /local?"
+            elif command == "/weekend":
+                suggestion = "\nMaybe try /local for all upcoming?"
+            elif command == "/local":  # User already tried broad search
+                suggestion = "\nMaybe try /random to see what else is on?"
+            elif command == "/best":
+                suggestion = "\nMaybe try /local or /random?"
+
+            send_telegram_message(chat_id, base_msg + suggestion)
             return
 
         # Add distance if user location known
@@ -775,7 +801,6 @@ def send_event_messages(
             postcode=postcode,
             user_lat=user_lat,
             user_lon=user_lon,
-            show_full_description=False # Ensure default is collapsed view for multi-send
         )
         if message:
             # Send message WITHOUT reply_markup (no buttons)
@@ -803,9 +828,48 @@ def process_message(msg: ta.Dict[str, ta.Any]) -> None:
     upsert_chat_info(chat_id, chat_type, user_info)
 
     # --- Command Routing ---
-    if text_lower in ["/start", "/help", "help", "hello", "hi", "?"]: # Simple Commands
+    quick_action_keyboard = {
+        "inline_keyboard": [
+            [  # Row 1: Core time/location filters
+                {"text": "📅 Today", "switch_inline_query_current_chat": "/today"},
+                {"text": "🎉 Weekend", "switch_inline_query_current_chat": "/weekend"},
+                {"text": "🧭 Nearby", "switch_inline_query_current_chat": "/local"}
+            ],
+            # Row 2: Discovery commands
+            [
+                {"text": "🏆 Top Picks", "switch_inline_query_current_chat": "/best"},
+                {"text": "🍀 Random", "switch_inline_query_current_chat": "/random"}
+            ]
+        ]
+    }
+    if text_lower == "/start":
         awaiting_location_update[chat_id] = False
-        send_telegram_message(chat_id, help_text); return
+        send_telegram_message(chat_id, help_text, reply_markup=quick_action_keyboard)
+        return
+
+    if text_lower in ["/help", "help", "hello", "hi", "?"]:
+        awaiting_location_update[chat_id] = False
+
+        # --- Day-specific greeting ---
+        now_utc = datetime.datetime.utcnow()
+        london_tz = ZoneInfo("Europe/London")
+        now_london = now_utc.astimezone(london_tz)
+        weekday = now_london.weekday()
+
+        greeting = ""
+        if weekday == 4:  # Friday
+            greeting = "Happy Friday! 🎉 Looking for weekend events?\n\n"
+        elif weekday == 5 or weekday == 6:
+            greeting = "Hope you're having a great weekend! 😎\n\n"
+        elif weekday == 0:
+            greeting = "Morning! Hope you had a good weekend. Planning your week?\n\n"
+        else:  # Tuesday, Wednesday, Thursday
+            greeting = "Hi there! 👋 Let's find some events.\n\n"
+
+        # Prepend greeting to the standard help text
+        full_help_message = greeting + help_text_commands
+        send_telegram_message(chat_id, full_help_message, reply_markup=quick_action_keyboard)
+        return
     if text_lower == "/updatelocation":
         awaiting_location_update[chat_id] = True
         send_telegram_message(chat_id, "OK. Please send me your London postcode (e.g., SW1A 0AA)."); return
@@ -961,7 +1025,8 @@ def process_message(msg: ta.Dict[str, ta.Any]) -> None:
     # --- Fallback ---
     else:
         if not awaiting_location_update.get(chat_id, False):
-             send_telegram_message(chat_id, "Sorry, I didn't understand that. Try /help to see available commands.")
+            full_help_message = "Sorry, I didn't understand that." + help_text_commands
+            send_telegram_message(chat_id, full_help_message, reply_markup=quick_action_keyboard)
 
 
 def process_callback_query(callback_query: ta.Dict[str, ta.Any]) -> None:
