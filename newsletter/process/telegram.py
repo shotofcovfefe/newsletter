@@ -827,24 +827,9 @@ def process_message(msg: ta.Dict[str, ta.Any]) -> None:
     logger.info(f"Processing message from chat {chat_id} (user: {user_id}): '{text_raw}'")
     upsert_chat_info(chat_id, chat_type, user_info)
 
-    # --- Command Routing ---
-    quick_action_keyboard = {
-        "inline_keyboard": [
-            [  # Row 1: Core time/location filters
-                {"text": "📅 Today", "switch_inline_query_current_chat": "/today"},
-                {"text": "🎉 Weekend", "switch_inline_query_current_chat": "/weekend"},
-                {"text": "🧭 Nearby", "switch_inline_query_current_chat": "/local"}
-            ],
-            # Row 2: Discovery commands
-            [
-                {"text": "🏆 Top Picks", "switch_inline_query_current_chat": "/best"},
-                {"text": "🍀 Random", "switch_inline_query_current_chat": "/random"}
-            ]
-        ]
-    }
     if text_lower == "/start":
         awaiting_location_update[chat_id] = False
-        send_telegram_message(chat_id, help_text, reply_markup=quick_action_keyboard)
+        send_telegram_message(chat_id, help_text)
         return
 
     if text_lower in ["/help", "help", "hello", "hi", "?"]:
@@ -868,7 +853,7 @@ def process_message(msg: ta.Dict[str, ta.Any]) -> None:
 
         # Prepend greeting to the standard help text
         full_help_message = greeting + help_text_commands
-        send_telegram_message(chat_id, full_help_message, reply_markup=quick_action_keyboard)
+        send_telegram_message(chat_id, full_help_message)
         return
     if text_lower == "/updatelocation":
         awaiting_location_update[chat_id] = True
@@ -1025,8 +1010,8 @@ def process_message(msg: ta.Dict[str, ta.Any]) -> None:
     # --- Fallback ---
     else:
         if not awaiting_location_update.get(chat_id, False):
-            full_help_message = "Sorry, I didn't understand that." + help_text_commands
-            send_telegram_message(chat_id, full_help_message, reply_markup=quick_action_keyboard)
+            full_help_message = "Sorry, I didn't understand that.\n\n" + help_text_commands
+            send_telegram_message(chat_id, full_help_message)
 
 
 def process_callback_query(callback_query: ta.Dict[str, ta.Any]) -> None:
