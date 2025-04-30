@@ -667,42 +667,30 @@ def handle_single_event_command(chat_id: str, command: str) -> None:
     }
     config = command_config.get(command);
     if not config: logger.error(f"Invalid command: {command}"); return
-
     callback_data: str = config["cb"]; time_period_context: str = config["ctx"]
     is_location_based: bool = config["loc"]
     user_pc: ta.Optional[str] = None; lat: ta.Optional[float] = None; lon: ta.Optional[float] = None
     fetch_params: ta.Dict[str, ta.Any] = {}; fetched_events: ta.List[ta.Dict[str, ta.Any]] = []
     no_event_context: str = ""
-
     if is_location_based:
         user_pc, lat, lon = get_user_location(chat_id)
         if not user_pc: send_telegram_message(chat_id, LOCATION_PROMPT_MESSAGE); return
         if lat is None or lon is None: send_telegram_message(chat_id, GEOCODE_ERROR_MESSAGE.format(postcode=user_pc)); return
-        fetch_params.update({"user_lat": lat, "user_lon": lon})
-        no_event_context = f"near {user_pc.upper()}"
+        fetch_params.update({"user_lat": lat, "user_lon": lon}); no_event_context = f"near {user_pc.upper()}"
 
-    # Keep original try/except around fetch
     try:
         today_date = datetime.now(timezone.utc).date()
-        # Determine date range for the initial fetch
-        if command == "/weekend":
-            today_weekday=today_date.weekday(); days_until_saturday=(5-today_weekday+7)%7
-            saturday_date=today_date+timedelta(days=days_until_saturday); monday_date=saturday_date+timedelta(days=2)
-            fetch_params["date_from"]=saturday_date.strftime("%Y-%m-%d"); fetch_params["date_to"]=monday_date.strftime("%Y-%m-%d")
-            no_event_context = f"starting this weekend {no_event_context}".strip()
-        elif command in ["/local", "/today", "/tomorrow"]:
-            days_offset = config.get("days", 0); start_date = today_date + timedelta(days=days_offset)
-            if command == "/local": end_date = start_date + timedelta(days=7); no_event_context = f"starting in the next 7 days {no_event_context}".strip()
-            else: end_date = start_date + timedelta(days=1); no_event_context = f"starting {time_period_context} {no_event_context}".strip()
-            fetch_params["date_from"] = start_date.strftime("%Y-%m-%d"); fetch_params["date_to"] = end_date.strftime("%Y-%m-%d")
+        date_from_str: ta.Optional[str] = None; date_to_str: ta.Optional[str] = None
+        if command == "/weekend": today_weekday=today_date.weekday(); days_until_saturday=(5-today_weekday+7)%7; saturday_date=today_date+timedelta(days=days_until_saturday); monday_date=saturday_date+timedelta(days=2); date_from_str=saturday_date.strftime("%Y-%m-%d"); date_to_str=monday_date.strftime("%Y-%m-%d"); no_event_context = f"starting this weekend {no_event_context}".strip()
+        elif command in ["/local", "/today", "/tomorrow"]: days_offset = config.get("days", 0); start_date = today_date + timedelta(days=days_offset); end_date = start_date + timedelta(days=(7 if command == "/local" else 1)); date_from_str = start_date.strftime("%Y-%m-%d"); date_to_str = end_date.strftime("%Y-%m-%d"); no_event_context = f"starting {'in the next 7 days' if command == '/local' else time_period_context} {no_event_context}".strip()
 
-        # Fetch multiple events for list navigation
-        list_fetch_limit = HISTORY_SIZE # Fetch enough for history/navigation
+        list_fetch_limit = HISTORY_SIZE
         if command in ["/random", "/best"]:
             fetched_events = fetch_random_events(days_ahead=DEFAULT_RANDOM_DAYS_AHEAD, limit=list_fetch_limit)
             no_event_context = "matching that criteria"
         elif is_location_based or command in ["/local", "/today", "/tomorrow", "/weekend"]:
-            fetched_events = fetch_events(overall_limit=list_fetch_limit, **fetch_params)
+             fetch_params["date_from"] = date_from_str; fetch_params["date_to"] = date_to_str
+             fetched_events = fetch_events( overall_limit=list_fetch_limit, limit_per_venue=2, **fetch_params )
 
         if not fetched_events:
             base_msg = NO_EVENTS_MESSAGE.format(context=no_event_context, postcode=user_pc.upper() if user_pc else "your area")
@@ -710,59 +698,36 @@ def handle_single_event_command(chat_id: str, command: str) -> None:
             suggestion = suggestion_map.get(command, "")
             send_telegram_message(chat_id, base_msg + suggestion); return
 
-        # Prepare the first event to show
         event_to_display = fetched_events[0]
-        if lat is not None and lon is not None: # Add distance to the first event
+        if lat is not None and lon is not None:
              try:
-                 lat_val = event_to_display.get("latitude"); lon_val = event_to_display.get("longitude")
-                 if lat_val is not None and lon_val is not None:
-                     ev_lat=float(lat_val); ev_lon=float(lon_val)
-                     event_to_display["distance_km"] = haversine_distance(lat, lon, ev_lat, ev_lon)
-             except (ValueError, TypeError) as e: logger.warning(f"Could not calculate distance for initial event {command}: {e}")
+                 lat_val=event_to_display.get("latitude"); lon_val=event_to_display.get("longitude")
+                 if lat_val is not None and lon_val is not None: ev_lat=float(lat_val); ev_lon=float(lon_val); event_to_display["distance_km"]=haversine_distance(lat,lon,ev_lat,ev_lon)
+             except (ValueError, TypeError) as e: logger.warning(f"Could not calc dist {command}: {e}")
 
     except Exception as e:
-        logger.error(f"Error fetching event list for command {command}: {e}", exc_info=True)
-        send_telegram_message(chat_id, DEFAULT_ERROR_MESSAGE); return
+        logger.error(f"Error fetching list {command}: {e}", exc_info=True); send_telegram_message(chat_id, DEFAULT_ERROR_MESSAGE); return
 
-    # Keep original try/except around sending message
     try:
         can_go_forward = len(fetched_events) > 1
-        keyboard = create_event_keyboard(
-            event=event_to_display,
-            refresh_callback_data=callback_data, # For the 'New' button
-            can_go_back=False, # Cannot go back initially
-            can_go_forward=can_go_forward, # Can go forward if >1 event fetched
-            is_currently_expanded=False
-        )
-        message_text = format_events_message(
-            events=[event_to_display], time_period=time_period_context,
-            postcode=user_pc, user_lat=lat, user_lon=lon, show_details=False
-        )
+        keyboard = create_event_keyboard( event=event_to_display, refresh_callback_data=callback_data, can_go_back=False, can_go_forward=can_go_forward, is_currently_expanded=False )
+        message_text = format_events_message( events=[event_to_display], time_period=time_period_context, postcode=user_pc, user_lat=lat, user_lon=lon, show_details=False )
 
-        sent_message_api_response = _telegram_api_request("sendMessage", {
-             "chat_id": str(chat_id), "text": message_text, "parse_mode": "HTML",
-             "disable_web_page_preview": True, "reply_markup": json.dumps(keyboard if keyboard else {})
-         })
+        sent_message_api_response = _telegram_api_request("sendMessage", { "chat_id": str(chat_id), "text": message_text, "parse_mode": "HTML", "disable_web_page_preview": True, "reply_markup": json.dumps(keyboard if keyboard else {}) })
 
-        # Initialize State: History, Context, Expansion, List Cache, List Index
         if sent_message_api_response and sent_message_api_response.get('ok') and isinstance(sent_message_api_response.get("result"), dict) and (msg_id := sent_message_api_response["result"].get('message_id')):
             history_key = (str(chat_id), msg_id)
-            # History starts with just the first event
+            # Initialize all state, including list cache, regardless of length initially
             message_event_history[history_key] = deque([event_to_display.copy()], maxlen=HISTORY_SIZE)
-            # Store original command context for refresh button
             message_context_type[history_key] = callback_data
-            # Store initial expansion state
             message_expansion_state[history_key] = False
-            # Store the fetched list and current index (0)
-            message_event_list_cache[history_key] = fetched_events
-            message_list_index[history_key] = 0
-            logger.info(f"Initialized list navigation state for msg {msg_id}. List size: {len(fetched_events)}")
-        else:
-            logger.error(f"Failed to get message_id after sending {command}. API Response: {sent_message_api_response}")
+            message_event_list_cache[history_key] = fetched_events # Store the list always
+            message_list_index[history_key] = 0 # Store index 0 always
+            logger.info(f"Initialized state msg {msg_id}. List size: {len(fetched_events)}")
+        else: logger.error(f"Failed message_id {command}. API Response: {sent_message_api_response}")
 
     except Exception as e:
-        logger.error(f"Error formatting/sending event for command {command}: {e}", exc_info=True)
-        send_telegram_message(chat_id, DEFAULT_ERROR_MESSAGE)
+        logger.error(f"Error formatting/sending {command}: {e}", exc_info=True); send_telegram_message(chat_id, DEFAULT_ERROR_MESSAGE)
 
 
 def handle_refresh_callback(chat_id: str, message_id: int, callback_data: str) -> None:
@@ -1126,45 +1091,64 @@ def process_callback_query(callback_query: ta.Dict[str, ta.Any]) -> None:
         cached_list = message_event_list_cache.get(history_key)
         current_index = message_list_index.get(history_key)
 
+        # Check if list cache exists and index is valid for going back
         if cached_list is not None and current_index is not None and current_index > 0:
-            # Keep original try/except
             try:
                 new_index = current_index - 1
-                event_to_show = cached_list[new_index] # Get previous from CACHED LIST
-                message_list_index[history_key] = new_index # Update index state
+                event_to_show = cached_list[new_index]
+                message_list_index[history_key] = new_index  # Update state
 
-                # NOTE: We intentionally DO NOT modify message_event_history here.
-                # It tracks viewed sequence, not list position. Back doesn't add to it.
-
-                can_go_back = new_index > 0
-                can_go_forward = True # Always true if we went back
+                can_go_back = new_index > 0  # Correctly checks lower bound
+                # --- MODIFIED LINE ---
+                # Check if forward is possible based on list bounds
+                can_go_forward = new_index < len(cached_list) - 1
+                # --- END MODIFIED LINE ---
 
                 user_pc_back, lat_back, lon_back = get_user_location(chat_id)
                 if lat_back is not None and lon_back is not None:
-                    try: # Add distance
-                        lat_val = event_to_show.get("latitude"); lon_val = event_to_show.get("longitude")
-                        if lat_val is not None and lon_val is not None: ev_lat=float(lat_val); ev_lon=float(lon_val); event_to_show["distance_km"]=haversine_distance(lat_back, lon_back, ev_lat, ev_lon)
-                    except (ValueError, TypeError) as e: logger.warning(f"Failed dist on back: {e}")
+                    try:  # Add distance
+                        lat_val = event_to_show.get("latitude");
+                        lon_val = event_to_show.get("longitude")
+                        if lat_val is not None and lon_val is not None: ev_lat = float(lat_val);ev_lon = float(lon_val);
+                        event_to_show["distance_km"] = haversine_distance(lat_back, lon_back, ev_lat, ev_lon)
+                    except (ValueError, TypeError) as e:
+                        logger.warning(f"Failed dist back: {e}")
 
                 current_state_expanded = message_expansion_state.get(history_key, False)
+                keyboard = create_event_keyboard(event=event_to_show, refresh_callback_data=original_context,
+                                                 can_go_back=can_go_back, can_go_forward=can_go_forward,
+                                                 is_currently_expanded=current_state_expanded)
+                message_text = format_events_message(events=[event_to_show], postcode=user_pc_back, user_lat=lat_back,
+                                                     user_lon=lon_back, show_details=current_state_expanded)
 
-                keyboard = create_event_keyboard( event=event_to_show, refresh_callback_data=original_context, can_go_back=can_go_back, can_go_forward=can_go_forward, is_currently_expanded=current_state_expanded)
-                message_text = format_events_message( events=[event_to_show], postcode=user_pc_back, user_lat=lat_back, user_lon=lon_back, show_details=current_state_expanded)
-
-                if not edit_telegram_message(chat_id, message_id, message_text, reply_markup=keyboard): logger.error(f"Edit failed for show_previous on msg {message_id}")
-
-            except IndexError: logger.error(f"Index error during show_previous for msg {message_id}. Index: {new_index}, List size: {len(cached_list)}"); edit_telegram_message(chat_id, message_id, DEFAULT_ERROR_MESSAGE, None)
-            except Exception as e: logger.error(f"Error processing show_previous: {e}", exc_info=True); edit_telegram_message(chat_id, message_id, DEFAULT_ERROR_MESSAGE, None)
-        else:
-            logger.warning(f"Cannot go back further or list cache missing for msg {message_id}")
-            # Optionally edit keyboard to disable back button if possible (requires knowing current event)
+                if not edit_telegram_message(chat_id, message_id, message_text, reply_markup=keyboard): logger.error(
+                    f"Edit failed show_previous msg {message_id}")
+            except IndexError:
+                logger.error(
+                    f"Index err show_previous msg {message_id}. Idx: {new_index}, Size: {len(cached_list)}"); edit_telegram_message(
+                    chat_id, message_id, DEFAULT_ERROR_MESSAGE, None)
+            except Exception as e:
+                logger.error(f"Error show_previous: {e}", exc_info=True); edit_telegram_message(chat_id, message_id,
+                                                                                                DEFAULT_ERROR_MESSAGE,
+                                                                                                None)
+        else:  # Cannot go back or cache missing
+            logger.warning(f"Cannot go back further or cache missing msg {message_id}")
+            # Optionally edit keyboard to disable back button
             history = message_event_history.get(history_key)
             if history and original_context:
-                 try:
-                     current_event = history[-1]; current_state_expanded = message_expansion_state.get(history_key, False)
-                     keyboard = create_event_keyboard(current_event, original_context, can_go_back=False, can_go_forward=True, is_currently_expanded=current_state_expanded)
-                     _telegram_api_request("editMessageReplyMarkup", {"chat_id": chat_id, "message_id": message_id, "reply_markup": json.dumps(keyboard if keyboard else {})})
-                 except Exception as e: logger.error(f"Error editing keyboard for show_previous (at start): {e}")
+                try:
+                    current_event = history[-1];
+                    current_state_expanded = message_expansion_state.get(history_key, False)
+                    # Determine if forward is possible even if back isn't
+                    can_go_forward_at_start = cached_list is not None and 0 < len(cached_list) - 1
+                    keyboard = create_event_keyboard(current_event, original_context, can_go_back=False,
+                                                     can_go_forward=can_go_forward_at_start,
+                                                     is_currently_expanded=current_state_expanded)
+                    _telegram_api_request("editMessageReplyMarkup", {"chat_id": chat_id, "message_id": message_id,
+                                                                     "reply_markup": json.dumps(
+                                                                         keyboard if keyboard else {})})
+                except Exception as e:
+                    logger.error(f"Error editing keyboard show_previous (at start): {e}")
 
 
     # --- Forward Action (New - Uses List Cache) ---
