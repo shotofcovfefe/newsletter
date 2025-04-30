@@ -581,10 +581,10 @@ def create_event_keyboard(
     # --- Populate Top Navigation Row ---
     # 1. Back Button
     if can_go_back:
-        nav_row.append({"text": "⏪ Back", "callback_data": "show_previous"})
+        nav_row.append({"text": "⏪", "callback_data": "show_previous"})
 
     # 2. Refresh/Random Button (using original context callback)
-    nav_row.append({"text": "🔄 Next", "callback_data": refresh_callback_data})
+    nav_row.append({"text": "🔄 Shuffle", "callback_data": refresh_callback_data})
 
     # 3. Forward Navigation Button
     if can_go_forward: # Requires logic to determine if forward is possible
