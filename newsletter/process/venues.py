@@ -27,7 +27,7 @@ def extract_domain(url: str) -> ta.Optional[str]:
 
 
 def main() -> None:
-    with open("venues.json", "r", encoding="utf-8") as f:
+    with open("newsletter/data/venues_single.json", "r", encoding="utf-8") as f:
         venues_data = json.load(f)
 
     rows_to_insert = []
@@ -50,11 +50,10 @@ def main() -> None:
         })
 
     try:
-        supabase.table("venues").delete().neq("domain", None).execute()
-        logger.info("Existing rows deleted.")
-
-        # Insert new data
-        response = supabase.table("venues").insert(rows_to_insert).execute()
+        response = supabase.table("venues").upsert(
+            rows_to_insert,
+            on_conflict="id"
+        ).execute()
         logger.info("Insert successful")
         logger.info(response.data)
     except Exception as e:

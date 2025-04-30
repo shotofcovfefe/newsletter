@@ -4,6 +4,7 @@ import logging
 import typing as t
 from dotenv import load_dotenv
 from supabase import create_client
+from datetime import date, time, datetime, timezone
 
 from newsletter.types import Event
 
@@ -19,6 +20,86 @@ if SUPABASE_KEY:
 
 # Create the Supabase client once at import time
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+
+
+# ---------- helpers -----------------------------------------------------------
+
+def _date_to_iso(d: date | None) -> str | None:
+    return d.isoformat() if d else None
+
+def _time_to_str(t: time | None) -> str | None:
+    return t.isoformat(timespec="seconds") if t else None
+
+
+def email_already_parsed(message_id: str) -> bool:
+    res_1 = (
+        supabase.table("events")
+        .select("id")
+        .eq("email_message_id", message_id)
+        .limit(1)
+        .execute()
+    )
+    if bool(res_1.data):
+        return True
+
+    res_2 = (
+        supabase.table("emails_processed")
+        .select("message_id")
+        .eq("message_id", message_id)
+        .limit(1)
+        .execute()
+    )
+    if bool(res_2.data):
+        return True
+    return False
+
+
+def fetch_all_emails() -> t.List[t.Dict[str, t.Any]]:
+    """Fetch every stored email (add filters/pagination in prod)."""
+    try:
+        res = supabase.table("emails").select("*").execute()
+        return res.data or []
+    except Exception as exc:
+        logger.error("Failed to fetch emails: %s", exc)
+        return []
+
+
+# ---------- event persistence -------------------------------------------------
+
+def _datetime_to_iso(dt: datetime | None) -> str | None:
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.isoformat()
+
+
+def save_events_to_db(events: list[Event], email_message_id: str) -> None:
+    """
+    Insert a batch of events into `events` iff the email hasn’t been parsed.
+    """
+    if not events:
+        return
+
+    if email_already_parsed(email_message_id):
+        logger.info("Events for %s already in DB – skipping insert.", email_message_id)
+        return
+
+    rows: list[dict[str, t.Any]] = []
+    for ev in events:
+        rec = ev.dict()
+
+        # --- SERIALISE new date/time columns -----------------------
+        rec["start_date"] = _date_to_iso(rec["start_date"])
+        rec["end_date"]   = _date_to_iso(rec["end_date"])
+        rec["start_time"] = _time_to_str(rec["start_time"])
+        rec["end_time"]   = _time_to_str(rec["end_time"])
+
+        rec["email_message_id"] = email_message_id
+        rows.append(rec)
+
+    supabase.table("events").insert(rows).execute()
+    logger.info("Inserted %s events for %s", len(rows), email_message_id)
 
 
 def email_exists(message_id: str) -> bool:
@@ -39,37 +120,14 @@ def email_exists(message_id: str) -> bool:
         return False
 
 
-def email_already_parsed(message_id: str) -> bool:
-    """
-    Returns True if we've already inserted at least one event for this email_message_id in the 'events' table.
-    """
-    try:
-        result = (
-            supabase.table("events")
-            .select("id")
-            .eq("email_message_id", message_id)
-            .limit(1)
-            .execute()
-        )
-        # If there's any row, we've parsed this email before
-        return len(result.data) > 0
-    except Exception as e:
-        logger.error(f"Error checking if email {message_id} was previously parsed: {e}")
-        # On error, default to False so we don't skip a potentially valid parse
-        return False
-
-
 def save_email(email_data: t.Dict[str, t.Any]) -> None:
     """
     Saves the given email data to the Supabase 'emails' table.
     """
     date = email_data["date"]
     if date:
-        try:
-            date = dateutil.parser.parse(date)
-            date = date.isoformat()  # e.g. '2025-03-10T20:58:24+01:00'
-        except Exception as e:
-            logger.warning(f"Could not parse date '{date}'. Storing as null. Error: {e}")
+        date = dateutil.parser.parse(date)
+        date = date.isoformat()  # e.g. '2025-03-10T20:58:24+01:00'
 
     data = {
         "message_id": email_data["message_id"],
@@ -81,56 +139,49 @@ def save_email(email_data: t.Dict[str, t.Any]) -> None:
         "body": email_data["body"],
         "is_newsletter": email_data["is_newsletter"],
     }
+    print(data['sender_name'])
 
-    try:
-        supabase.table("emails").insert(data).execute()
-        logger.info(f"Stored email {data['message_id']} in Supabase.")
-    except Exception as e:
-        logger.error(f"Failed to save email {data['message_id']}: {e}")
+    supabase.table("emails").insert(data).execute()
+    logger.info(f"Stored email {data['message_id']} in Supabase.")
 
 
-def fetch_all_emails() -> t.List[t.Dict[str, t.Any]]:
+def email_already_processed(message_id: str) -> bool:
     """
-    Fetches all emails from the emails table.
-    You might add WHERE clauses or pagination here in a real system.
+    True ⇢ row exists in emails_processed.
     """
-    try:
-        response = supabase.table("emails").select("*").execute()
-        return response.data or []
-    except Exception as exc:
-        logger.error(f"Failed to fetch emails: {exc}")
-        return []
+    res = (
+        supabase.table("emails_processed")
+        .select("message_id")
+        .eq("message_id", message_id)
+        .limit(1)
+        .execute()
+    )
+    return bool(res.data)
 
-
-def save_events_to_db(events: t.List[Event], email_message_id: str) -> None:
+def mark_email_processed(message_id: str, parsed_ok: bool, note: str | None = None) -> None:
     """
-    Saves all events from a given email to the 'events' table *if* we haven't
-    already parsed this email (checking email_already_parsed).
+    Upsert {message_id, processed_at, parsed_ok, note}.
     """
-    if not events:
-        return
+    row = {
+        "message_id":  message_id,
+        "processed_at": datetime.utcnow().isoformat(),
+        "parsed_ok":   parsed_ok,
+        "note":        note,
+    }
+    supabase.table("emails_processed").upsert(row).execute()
 
-    # 1) If the email was already parsed, skip
-    if email_already_parsed(email_message_id):
-        logger.info(f"Email {email_message_id} was previously parsed. Skipping event insert.")
-        return
 
-    # 2) Otherwise, insert these events (attach email_message_id for reference)
-    events_dicts = []
-    for event in events:
-        record = event.dict()
+def fetch_unprocessed_emails(batch_size: int = 10000) -> list[dict]:
+    """
+    Return up to `batch_size` emails that have **no** row in emails_processed.
+    """
+    # grab processed ids only once (tiny table)
+    res = supabase.table("emails_processed").select("message_id").execute()
+    done = {r["message_id"] for r in (res.data or [])}
 
-        if record["event_start_date"] is not None:
-            record["event_start_date"] = record["event_start_date"].isoformat()
+    q = supabase.table("emails").select("*")
+    if batch_size:
+        q = q.limit(batch_size)
 
-        if record["event_end_date"] is not None:
-            record["event_end_date"] = record["event_end_date"].isoformat()
-
-        record["email_message_id"] = email_message_id
-        events_dicts.append(record)
-
-    try:
-        response = supabase.table("events").insert(events_dicts).execute()
-        logger.info(f"Inserted {len(response.data)} events into 'events' table for email {email_message_id}.")
-    except Exception as exc:
-        logger.error(f"Failed to insert events for email {email_message_id}: {exc}")
+    emails = q.execute().data or []
+    return [e for e in emails if e["message_id"] not in done]

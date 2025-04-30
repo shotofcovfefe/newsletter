@@ -4,15 +4,20 @@ import re
 import email.header
 from bs4 import BeautifulSoup
 from email.utils import parseaddr
+from dateutil import parser
 
 from openai import OpenAI
+from supabase import create_client, Client
 
 from newsletter.gmail_client import GmailClient
-from newsletter.database import email_exists, save_email
+from newsletter.database import save_email
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 
@@ -32,6 +37,10 @@ def strip_html(html: str) -> str:
     text = soup.get_text(separator="#")
     text = re.sub(r'[\n]+', '\n', text).replace("\n#", "")
     return text
+
+
+def remove_urls(text: str) -> str:
+    return re.sub(r'https?:\/\/\S+', '', text, flags=re.MULTILINE).strip()
 
 
 def decode_sender_name(sender_raw: str) -> str:
@@ -91,19 +100,38 @@ def is_events_newsletter(email_body: str) -> bool:
         return False
 
 
+def format_date_for_gmail_query(iso_date: str) -> str:
+    """
+    Convert ISO8601 timestamp to Gmail 'after:' query format.
+    Gmail expects a unix timestamp (seconds since epoch).
+    """
+    dt = parser.isoparse(iso_date)
+    return str(int(dt.timestamp()))
+
+
 def main() -> None:
     """
     Main entry point:
-      1. Create a GmailClient using an existing token file.
-      2. Fetch messages with a chosen query (e.g., 'in:inbox', 'is:unread', etc.).
-      3. For each message, check if its Message-ID is already in the DB.
-      4. If not, extract its data and save it to Supabase.
+      1. Find the latest processed email date.
+      2. Fetch only emails sent after that date.
+      3. Skip any Message-ID already processed.
+      4. Save new emails into Supabase.
     """
     # Initialize the Gmail client
     gmail_client = GmailClient(token_path="token.json")
 
-    # Adjust or remove the query based on your needs. E.g. "in:inbox", "is:unread", etc.
-    messages = gmail_client.fetch_messages(query="in:inbox")
+    # 1. Find the latest processed email date
+    date_res = supabase.table("emails").select("processed_at").order("processed_at", desc=True).limit(1).execute()
+    latest_processed_date = date_res.data[0]["processed_at"]
+    logger.info(f"Latest processed email at: {latest_processed_date}")
+    gmail_query = f"after:{format_date_for_gmail_query(latest_processed_date)}"
+
+    # 2. Fetch messages with the constructed query
+    messages = gmail_client.fetch_messages(query=gmail_query)
+
+    # 3. Get all already-processed message_ids
+    processed_emails = supabase.table("emails_processed").select("message_id").execute()
+    processed_ids = {r["message_id"] for r in processed_emails.data or []}
 
     for email_msg in messages:
         message_id = email_msg.get("Message-ID")
@@ -112,8 +140,7 @@ def main() -> None:
             logger.warning("Email is missing Message-ID; skipping.")
             continue
 
-        if email_exists(message_id):
-            logger.info(f"Email with Message-ID {message_id} already exists in DB. Skipping.")
+        if message_id in processed_ids:
             continue
 
         email_body = gmail_client.extract_email_body(email_msg)
@@ -136,21 +163,10 @@ def main() -> None:
             email_body = strip_html(email_body)
             email_data['body'] = remove_urls(email_body)
 
-        try:
-            newsletter_flag = is_events_newsletter(email_data['body'])
-        except Exception as exc:
-            logger.error(f"Error determining if newsletter: {exc}")
-            newsletter_flag = False
+        email_data["is_newsletter"] = is_events_newsletter(email_data['body'])
 
-        # 2) Attach the result to the email data
-        email_data["is_newsletter"] = newsletter_flag
-
-        # Save to the database
+        # Save the email
         save_email(email_data)
-
-
-def remove_urls(text: str) -> str:
-    return re.sub(r'https?:\/\/\S+', '', text, flags=re.MULTILINE).strip()
 
 
 if __name__ == "__main__":

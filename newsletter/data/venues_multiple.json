@@ -1,0 +1,166 @@
+[
+  {
+    "name": "Museum Mum Newsletter",
+    "descriptions": "Family-friendly museum and cultural events in London for parents and children",
+    "url": "https://museummum.com/",
+    "email": "museummum@mail.beehiiv.com",
+    "newsletter_type": "family events",
+    "has_newsletter": true,
+    "signed_up": false
+  },
+  {
+    "name": "London Museum of Water & Steam Fam NL",
+    "descriptions": "Family events focusing on science, history, and technology at the museum",
+    "url": "https://www.waterandsteam.org.uk/",
+    "email": "",
+    "newsletter_type": "family events, science",
+    "has_newsletter": true,
+    "signed_up": false
+  },
+  {
+    "name": "London Sound Index",
+    "descriptions": "A twice-monthly newsletter listing all the best gigs happening in London",
+    "url": "https://londonsoundindex.substack.com/",
+    "email": "londonsoundindex@substack.com",
+    "newsletter_type": "music events",
+    "has_newsletter": true,
+    "signed_up": false
+  },
+  {
+    "name": "Seb’s Art List",
+    "descriptions": "Provides the most comprehensive and up-to-date list of art exhibitions and events in London",
+    "url": "https://sebsartlist.com/",
+    "email": "",
+    "newsletter_type": "art",
+    "has_newsletter": true,
+    "signed_up": false
+  },
+  {
+    "name": "South London Gallery Mailing List",
+    "descriptions": "Updates on exhibitions, events, and programs at the South London Gallery",
+    "url": "https://www.southlondongallery.org/",
+    "email": "donotreply@southlondongallery.org",
+    "newsletter_type": "art",
+    "has_newsletter": true,
+    "signed_up": false
+  },
+  {
+    "name": "Art of London Newsletter",
+    "descriptions": "Focused on art-related events, exhibitions, and news in London’s West End",
+    "url": "https://artoflondon.co.uk/",
+    "email": "campaigns@artoflondon.co.uk",
+    "newsletter_type": "art",
+    "has_newsletter": true,
+    "signed_up": false
+  },
+  {
+    "name": "New Exhibitions Newsletter",
+    "descriptions": "Listings of new art exhibitions in London and internationally",
+    "url": "https://www.newexhibitions.com/",
+    "email": "info@newexhibitions.com",
+    "newsletter_type": "art",
+    "has_newsletter": true,
+    "signed_up": false
+  },
+  {
+    "name": "London In Bits",
+    "descriptions": "Substack newsletter providing insights and updates on London events and news",
+    "url": "https://londoninbits.substack.com/",
+    "email": "londoninbits@substack.com",
+    "newsletter_type": "general events",
+    "has_newsletter": true,
+    "signed_up": false
+  },
+  {
+    "name": "Hampton Court Palace Food Festival NL",
+    "descriptions": "Updates on the annual food festival and related events at Hampton Court Palace",
+    "url": "https://www.hrp.org.uk/hampton-court-palace/",
+    "email": "",
+    "newsletter_type": "food events",
+    "has_newsletter": true,
+    "signed_up": false
+  },
+  {
+    "name": "Cheapskate London",
+    "descriptions": "Weekly newsletter focusing on free in-person and virtual events in London",
+    "url": "https://www.cheapskatelondon.com/",
+    "email": "hello@cheapskatelondon.com",
+    "newsletter_type": "free events",
+    "has_newsletter": true,
+    "signed_up": false
+  },
+  {
+    "name": "Absolutely London",
+    "descriptions": "Delivers tips on the latest happenings, events, and lifestyle in London",
+    "url": "https://absolutely.london/",
+    "email": "",
+    "newsletter_type": "lifestyle, events",
+    "has_newsletter": true,
+    "signed_up": false
+  },
+  {
+    "name": "London Pop-Ups “8 Days a Week”",
+    "descriptions": "Updates on pop-up restaurants, bars, and unique events in London",
+    "url": "https://www.londonpopups.com/",
+    "email": "dan.calladine@londonpopups.com",
+    "newsletter_type": "pop-up events",
+    "has_newsletter": true,
+    "signed_up": false
+  },
+  {
+    "name": "The London Scoop",
+    "descriptions": "Weekly guide to family-friendly events, fun activities, and exciting attractions across London for families",
+    "url": "https://www.thelondonscoop.com/subscribe",
+    "email": "",
+    "newsletter_type": "family events",
+    "has_newsletter": true,
+    "signed_up": false
+  },
+  {
+    "name": "Secret London Newsletter",
+    "descriptions": "Weekly roundup of new bars, restaurants, pop-ups, events, and art exhibitions",
+    "url": "https://secretldn.com/secret-london-newsletter/",
+    "email": "",
+    "newsletter_type": "general events, food, art",
+    "has_newsletter": true,
+    "signed_up": false
+  },
+  {
+    "name": "The London Weekend",
+    "descriptions": "Highlights weekend events and activities across London for planning",
+    "url": "https://www.thelondonweekend.com/",
+    "email": "",
+    "newsletter_type": "weekend events",
+    "has_newsletter": true,
+    "signed_up": false
+  },
+  {
+    "name": "The Nudge",
+    "descriptions": "Weekly recommendations for restaurants, bars, events, and cultural activities",
+    "url": "https://thenudge.com/email-signup/",
+    "email": "",
+    "newsletter_type": "food, events",
+    "has_newsletter": true,
+    "signed_up": false
+  },
+  {
+    "name": "Roman Road London",
+    "url": "https://romanroadlondon.com/subscribe/",
+    "address": null,
+    "postcode":  null,
+    "venue_type":  "newsletter",
+    "is_generic":  true,
+    "has_newsletter":  true,
+    "signed_up":  true
+  },
+  {
+    "name": "Jaguar Shoes Collective",
+    "url": "https://www.jaguarshoes.com/venues/the-victoria/",
+    "address": "451 Queensbridge Road\nDalston\nLondon\nE8 3AS",
+    "postcode":  "E8 3AS",
+    "venue_type":  "pub",
+    "is_generic":  true,
+    "has_newsletter":  true,
+    "signed_up":  false
+  }
+]
