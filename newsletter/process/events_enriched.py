@@ -359,12 +359,16 @@ def enrich_batch(batch: int = 500) -> None:
                 "card_date_line" : date_line,
                 "card_vibes"     : vibes_tags_raw,
                 "card_blurb"     : pretty["blurb"],
-                "recurrence_rule": e["recurrence_rule"],
                 "event_types"    : e["event_types"],
                 "audience_badges": e["target_audiences"],
                 "type_badge"     : pretty["event_type"],
                 "cost_line"      : cost,
                 "preview_image_url": e.get("image_url"),
+                "start_date": e.get("start_date"),
+                "end_date": e.get("end_date"),
+                "start_time": e.get("start_time"),
+                "end_time": e.get("end_time"),
+                "recurrence_rule": e["recurrence_rule"],
                 "venue_url"      : venue["url"],
             }
 
@@ -424,7 +428,6 @@ def main():
 
 
 if __name__=="__main__":
-    # Ensure logging is set up
     if not logger.handlers:
         h = logging.StreamHandler()
         h.setFormatter(logging.Formatter("[%(levelname)s] %(message)s"))
