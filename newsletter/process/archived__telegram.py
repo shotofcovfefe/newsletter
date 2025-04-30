@@ -1,15 +1,12 @@
 from collections import deque
-from dateutil.rrule import rrulestr, rrule
-from dateutil.parser import isoparse, ParserError
-from datetime import date, datetime, timedelta, timezone
 import os
 import time
 import logging
+import datetime
 import json
 import math
 import random
 import urllib.parse
-
 from zoneinfo import ZoneInfo
 
 import requests
@@ -173,28 +170,44 @@ def send_telegram_message(chat_id: str, text: str, reply_markup: ta.Optional[ta.
 
 
 def format_event_for_forwarding(event: ta.Dict[str, ta.Any]) -> str:
-    """Creates a plain text summary for forwarding. Uses NEW fields."""
+    """Creates a nicer plain text summary of an event suitable for forwarding."""
     lines = []
-    name = (event.get("card_title") or "Event").strip()
-    venue = (event.get("venue_name") or "Venue TBC").strip()
-    date = (event.get("card_date_line") or "Date TBC").strip()
-    cost = (event.get("cost_line") or "").strip()
-    summary = (event.get("card_blurb") or "").strip()
-    url = (event.get("venue_url") or "").strip()
 
-    lines.append(f"{name}")
+    # --- Core Event Info ---
+    # Use pretty names with fallbacks
+    name = (event.get("pretty_event_name") or event.get("title") or "Event").strip()
+    venue = (event.get("pretty_venue_name") or "Venue").strip() # Assume pretty_venue_name exists
+    date = (event.get("pretty_date") or event.get("event_date") or "Date TBC").strip()
+
+    # Use markdown-like bold for name (might render after sending)
+    lines.append(f"*{name}*")
     lines.append(f"📍 {venue}")
     lines.append(f"📅 {date}")
-    if cost: lines.append(f"💰 {cost}")
-    lines.append("")
+    lines.append("") # Add a blank line for separation
 
+    # --- Optional Details ---
+    # Include summary (pretty_description) if it exists
+    summary = (event.get("pretty_description") or "").strip()
     if summary:
+        # Truncate summary for forwarding context
+        max_fwd_summary = 150 # Keep it relatively brief
+        if len(summary) > max_fwd_summary:
+             summary = summary[:max_fwd_summary].strip() + "..."
         lines.append(f"📝 {summary}")
-        lines.append("")
+        lines.append("") # Add a blank line
 
+    # Include vibes if they exist
+    vibes = (event.get("vibes") or "").strip()
+    if vibes:
+        lines.append(f"✨ Vibes: {vibes}")
+        # lines.append("") # Optional blank line after vibes
+
+    # Include venue URL if it exists and is valid
+    url = (event.get("venue_url") or "").strip()
     if url and (url.startswith("http://") or url.startswith("https://")):
-        lines.append(f"🔗 {url}")
+        lines.append(f"🔗 Link: {url}")
 
+    # Join lines, ensuring no leading/trailing whitespace on the final string
     return "\n".join(lines).strip()
 
 
@@ -249,7 +262,7 @@ def set_user_postcode(chat_id: str, postcode: str) -> bool:
         supabase.table("user_postcodes").upsert({
             "chat_id": str(chat_id),
             "postcode": postcode.upper().strip(),
-            "created_date": datetime.utcnow().isoformat() # Use ISO format for timestamp
+            "created_date": datetime.datetime.utcnow().isoformat() # Use ISO format for timestamp
         }, on_conflict="chat_id").execute()
         return True
     except Exception as e:
@@ -271,7 +284,7 @@ def upsert_chat_info(chat_id: str, chat_type: str, user_info: ta.Dict[str, ta.An
         # if chat_type == 'private':
         #     supabase.table("telegram_subscribers").upsert({
         #         "chat_id": str(chat_id),
-        #         "subscribed_date": datetime.utcnow().isoformat()
+        #         "subscribed_date": datetime.datetime.utcnow().isoformat()
         #     }, on_conflict="chat_id").execute()
     except Exception as exc:
         logger.error(f"DB error updating chat/subscriber info for chat {chat_id}: {exc}", exc_info=True)
@@ -289,185 +302,84 @@ def unsubscribe_user(chat_id: str) -> bool:
 # --- Event Fetching ---
 
 def fetch_events(
-    date_from: ta.Optional[str] = None, # Expects YYYY-MM-DD
-    date_to: ta.Optional[str] = None, # Expects YYYY-MM-DD (exclusive end for ranges)
+    date_from: ta.Optional[str] = None,
+    date_to: ta.Optional[str] = None,
     user_lat: ta.Optional[float] = None,
     user_lon: ta.Optional[float] = None,
     max_distance_km: float = 15.0,
     limit_per_venue: int = 1,
     overall_limit: int = 5
 ) -> ta.List[ta.Dict[str, ta.Any]]:
-    """
-    Fetch events, applying date range filtering including recurrence checks in Python.
-    """
-    # --- Parse input dates and define target range [start_of_day, end_of_day) ---
+    """Fetch events from Supabase, applying filters and limits."""
+    data: ta.List[ta.Dict[str, ta.Any]] = [] # Initialize empty list
     try:
-        # Use UTC for all date comparisons
-        today_dt = datetime.now(timezone.utc)
+        query = supabase.table("events_enriched").select("*")
 
-        # Determine the exact start and end datetime for the query range
-        if date_from and date_to and date_from == date_to: # Single day query
-             start_of_day = isoparse(date_from).replace(tzinfo=timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
-             end_of_day = start_of_day + timedelta(days=1)
-        elif date_from and date_to: # Date range query
-             start_of_day = isoparse(date_from).replace(tzinfo=timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
-             end_of_day = isoparse(date_to).replace(tzinfo=timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
-        elif date_from: # Only start date given, assume single day
-             start_of_day = isoparse(date_from).replace(tzinfo=timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
-             end_of_day = start_of_day + timedelta(days=1)
-        else: # Default: today
-             start_of_day = today_dt.replace(hour=0, minute=0, second=0, microsecond=0)
-             end_of_day = start_of_day + timedelta(days=1)
-
-    except (ValueError, TypeError, ParserError) as e:
-        logger.error(f"Invalid date format provided: date_from='{date_from}', date_to='{date_to}'. Error: {e}")
-        return []
-
-    logger.info(f"Fetching events between {start_of_day.isoformat()} and {end_of_day.isoformat()}")
-
-    # --- Initial Candidate Fetching from Supabase ---
-    candidate_events: ta.List[ta.Dict[str, ta.Any]] = []
-    try:
-        # Fetch events starting before the end of the range.
-        # Further filtering (recurrence, exact overlap) happens in Python.
-        query = (
-            supabase.table("events_enriched")
-            .select("*") # Select all columns needed for filtering and display
-            .lt("start_date", end_of_day.strftime("%Y-%m-%d"))
-            # Optional: Add filter to exclude non-recurring events that ended before the range starts?
-            # .filter("end_date", "gte", start_of_day.strftime("%Y-%m-%d")) # Might exclude needed recurring starts
-            .order("start_date", desc=False)
-            # Fetch more candidates as Python filtering will reduce the list
-            .limit(max(overall_limit * 10, 50)) # Adjust limit as needed
-        )
+        # Date filtering
+        if date_from and date_to:
+            query = query.gte("event_date", date_from).lt("event_date", date_to) if date_from != date_to else query.eq("event_date", date_from)
+        elif date_from:
+            query = query.gte("event_date", date_from)
+        elif date_to:
+            query = query.lt("event_date", date_to)
+        elif not date_from and not date_to: # Default to future
+            query = query.gte("event_date", datetime.datetime.utcnow().strftime("%Y-%m-%d"))
 
         resp = query.execute()
-        candidate_events = resp.data if resp and hasattr(resp, 'data') and isinstance(resp.data, list) else []
-        logger.info(f"Fetched {len(candidate_events)} candidate events from DB.")
-
+        data = resp.data if resp and hasattr(resp, 'data') else [] # Ensure data is a list
     except Exception as exc:
-        logger.error(f"Error fetching candidate events from Supabase: {exc}", exc_info=True)
-        return [] # Return empty on DB error
+        logger.error(f"Error fetching events from Supabase: {exc}", exc_info=True)
+        return [] # Return empty on error
 
-    # --- Python Filtering (Date Range, Overlap & Recurrence) ---
-    relevant_events: ta.List[ta.Dict[str, ta.Any]] = []
-    for event in candidate_events:
-        rule_str = event.get("recurrence_rule")
-        start_date_str = event.get("start_date")
-        end_date_str = event.get("end_date") or start_date_str # Assume end=start if missing
-
-        if not start_date_str:
-            logger.warning(f"Skipping event with missing start_date: {event.get('event_id')}")
-            continue
-
-        try:
-            # Parse dates as aware datetime objects (UTC) at start of day
-            event_start_dt = isoparse(start_date_str).replace(tzinfo=timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
-            # Assume end_date is inclusive, so add 1 day to make it exclusive for range checks
-            event_end_dt_exclusive = isoparse(end_date_str).replace(tzinfo=timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
-
-        except (ValueError, TypeError, ParserError):
-             logger.warning(f"Skipping event: Invalid date format ID={event.get('event_id')}, Start={start_date_str}, End={end_date_str}")
-             continue
-
-        is_relevant = False
-        actual_occurrence_dt = None # Store the specific date it occurs in range
-
-        if rule_str:
-            # --- Recurring Event Check ---
-            try:
-                # Use event's start datetime as the base for the rule
-                event_rrule: rrule = rrulestr(rule_str, dtstart=event_start_dt)
-
-                # Find the first occurrence within the target range [start_of_day, end_of_day)
-                # Note: rrule.between includes start date, excludes end date by default
-                occurrences_in_range = event_rrule.between(start_of_day, end_of_day - timedelta(microseconds=1), inc=True) # Make range inclusive
-
-                if occurrences_in_range:
-                    is_relevant = True
-                    actual_occurrence_dt = occurrences_in_range[0] # Use first occurrence for sorting
-
-            except (ValueError, TypeError) as e:
-                 logger.warning(f"Skipping recurring event: Invalid rule/date ID={event.get('event_id')}, Rule='{rule_str}', Error: {e}")
-        else:
-            # --- Non-Recurring Event Check (Overlap) ---
-            # Check if [event_start_dt, event_end_dt_exclusive) overlaps with [start_of_day, end_of_day)
-            if event_start_dt < end_of_day and event_end_dt_exclusive > start_of_day:
-                is_relevant = True
-                # Use the later of event start or range start as the effective date for sorting within the range
-                actual_occurrence_dt = max(event_start_dt, start_of_day)
-
-        if is_relevant:
-            # Store the specific occurrence time for sorting
-            event['_occurrence_dt'] = actual_occurrence_dt
-            relevant_events.append(event)
-
-    logger.info(f"Found {len(relevant_events)} relevant events after date/recurrence filtering.")
-
-    # --- Apply Location Filtering (to relevant events) ---
+    # Location filtering
     if user_lat is not None and user_lon is not None:
         events_with_distance: ta.List[ta.Dict[str, ta.Any]] = []
-        for row in relevant_events:
-             lat_val = row.get("latitude"); lon_val = row.get("longitude")
-             if lat_val is not None and lon_val is not None:
-                 try:
-                     ev_lat = float(lat_val); ev_lon = float(lon_val)
-                     dist: float = haversine_distance(user_lat, user_lon, ev_lat, ev_lon)
-                     if dist <= max_distance_km:
-                         row["distance_km"] = dist; events_with_distance.append(row)
-                 except (ValueError, TypeError): pass
-        relevant_events = events_with_distance
-        if not relevant_events: return []
+        for row in data:
+            try:
+                # Ensure lat/lon are treated as floats, handle None/NaN
+                ev_lat: float = float(row.get("latitude")) if row.get("latitude") is not None else math.nan
+                ev_lon: float = float(row.get("longitude")) if row.get("longitude") is not None else math.nan
+                if not math.isnan(ev_lat) and not math.isnan(ev_lon):
+                    dist: float = haversine_distance(user_lat, user_lon, ev_lat, ev_lon)
+                    if dist <= max_distance_km:
+                        row["distance_km"] = dist
+                        events_with_distance.append(row)
+            except (ValueError, TypeError, AttributeError): # More specific error catching
+                 logger.warning(f"Could not parse lat/lon or calculate distance for event {row.get('event_id')}")
+        data = events_with_distance # Update data with filtered list
 
-    # --- Sort before applying venue limit for consistency ---
-    # Sort by the actual occurrence time, then title
-    relevant_events.sort(key=lambda x: (x.get('_occurrence_dt', datetime.max.replace(tzinfo=timezone.utc)), x.get('card_title', '')))
-
-    # --- Apply Limit Per Venue ---
+    # Apply limit per venue
     by_venue: ta.Dict[str, int] = {}
     filtered_by_venue: ta.List[ta.Dict[str, ta.Any]] = []
-    for r in relevant_events:
-        v_id: ta.Optional[str] = r.get("venue_id")
-        # Include events even if venue_id is missing? Assuming yes for now.
-        venue_key = v_id or f"no_venue_{r.get('event_id')}" # Create unique key if no venue_id
-        if venue_key not in by_venue: by_venue[venue_key] = 0
-        if by_venue[venue_key] < limit_per_venue:
-            filtered_by_venue.append(r)
-            by_venue[venue_key] += 1
-    relevant_events = filtered_by_venue
-    if not relevant_events: return []
+    for r in data:
+        v_id: ta.Optional[str] = r.get("venue_id") # venue_id could be None
+        if v_id: # Only process if venue_id exists
+            if v_id not in by_venue: by_venue[v_id] = 0
+            if by_venue[v_id] < limit_per_venue:
+                filtered_by_venue.append(r)
+                by_venue[v_id] += 1
+    data = filtered_by_venue # Update data again
 
-    # --- Final Sorting & Limit ---
-    # If location was provided, sort the final limited set by distance
+    # Sort and limit
+    sort_key: ta.Callable[[ta.Dict[str, ta.Any]], ta.Any]
     if user_lat is not None and user_lon is not None:
-        relevant_events.sort(key=lambda x: x.get("distance_km", float('inf')))
-    # Otherwise, they remain sorted by occurrence date/title from before venue limiting
+        sort_key = lambda x: x.get("distance_km", float('inf')) # Sort by distance, handle missing safely
+    else:
+        sort_key = lambda x: (x.get("event_date", ""), x.get("pretty_event_name", "")) # Sort by date then name
 
-    # Remove temporary key before returning
-    for ev in relevant_events: ev.pop('_occurrence_dt', None)
+    sorted_events: ta.List[ta.Dict[str, ta.Any]] = sorted(data, key=sort_key)
 
-    return relevant_events[:overall_limit]
+    return sorted_events[:overall_limit]
 
 
 def fetch_random_events(days_ahead: int = 7, limit: int = 1) -> ta.List[ta.Dict[str, ta.Any]]:
-    """Fetch random events using 'events_enriched' and 'start_date'."""
-    # Keep original try/except
+    """Fetch random events."""
     try:
-        # Use start_date for filtering
-        today_str: str = datetime.now(timezone.utc).date().strftime("%Y-%m-%d")
-        future_str: str = (datetime.now(timezone.utc).date() + timedelta(days=days_ahead)).strftime("%Y-%m-%d")
-        potential_limit: int = max(limit * 10, 50) # Fetch larger pool
-
-        resp = (
-            supabase.table("events_enriched")
-            .select("*")
-            # Use start_date instead of event_date
-            .gte("start_date", today_str)
-            .lt("start_date", future_str)
-            .limit(potential_limit)
-            .execute()
-        )
-        data: ta.List[ta.Dict[str, ta.Any]] = resp.data if resp and hasattr(resp, 'data') and isinstance(resp.data, list) else []
+        today_str: str = datetime.datetime.utcnow().strftime("%Y-%m-%d")
+        future_str: str = (datetime.datetime.utcnow() + datetime.timedelta(days=days_ahead)).strftime("%Y-%m-%d")
+        potential_limit: int = max(limit * 5, 20)
+        resp = supabase.table("events_enriched").select("*").gte("event_date", today_str).lt("event_date", future_str).limit(potential_limit).execute()
+        data: ta.List[ta.Dict[str, ta.Any]] = resp.data if resp and hasattr(resp, 'data') else []
         if not data: return []
         random.shuffle(data)
         return data[:limit]
@@ -485,7 +397,10 @@ def format_events_message(
     user_lon: ta.Optional[float] = None,
     show_details: bool = False
 ) -> str:
-    """Formats events using NEW fields from events_enriched."""
+    """
+    Format a list of events. Includes distance/direction if available.
+    Can optionally show/hide the pretty_description and vibes lines.
+    """
     if not events: return ""
 
     lines: ta.List[str] = []
@@ -496,62 +411,57 @@ def format_events_message(
 
     for ev in events:
         event_lines: ta.List[str] = []
-        type_badge = (ev.get("type_badge") or "").strip()
-        name: str = (ev.get("card_title") or "Event").strip()
-        venue: str = (ev.get("venue_name") or "Venue TBC").strip()
-        date: str = (ev.get("card_date_line") or "Date TBC").strip()
-        cost: str = (ev.get("cost_line") or "").strip()
+        # Safely get event details
+        name: str = (ev.get("pretty_event_name") or "Event").strip()
+        venue: str = (ev.get("pretty_venue_name") or "Venue").strip()
+        date: str = (ev.get("pretty_date") or ev.get("event_date") or "Date TBC").strip()
         url: str = (ev.get("venue_url") or "").strip()
-        vibes: str = (ev.get("card_vibes") or "").strip()
-        summary: str = (ev.get("card_blurb") or "").strip()
+        vibes: str = (ev.get("vibes") or "").strip()
+        summary: str = (ev.get("pretty_description") or "").strip() # Use "" as fallback instead of "No description"
 
-        title_line = f"<b>{name}</b>"
-        if type_badge:
-             title_line = f"<b>{type_badge} {name}</b>"
-        event_lines.append(title_line)
-
+        # Format venue with link
         venue_html: str = f"<i>{venue}</i>"
         if url and (url.startswith("http://") or url.startswith("https://")):
             try:
-                encoded_url: str = urllib.parse.quote(url, safe=':/%#?=&')
+                encoded_url: str = urllib.parse.quote(url, safe=':/%#?=@')
                 venue_html = f'<a href="{encoded_url}">{venue}</a>'
             except Exception as e: logger.warning(f"Failed to encode URL '{url}': {e}")
+
+        # --- Build Message Lines ---
+        event_lines.append(f"<b>{name}</b>")
         event_lines.append(f"📍 {venue_html}")
 
+        # <<< MODIFIED: Conditionally add summary (pretty_description) and vibes >>>
         if show_details:
-            if summary:
+            if summary: # Only add if summary is not empty
+                 # Truncate here if desired, or assume it's already short
                  max_summary_len: int = 250
                  display_summary = summary
                  if len(display_summary) > max_summary_len: display_summary = display_summary[:max_summary_len] + "..."
                  event_lines.append(f"👉 {display_summary}")
-            if vibes:
+
+            if vibes: # Only add if vibes is not empty
                 event_lines.append(f"✨ {vibes}")
+        # <<< END MODIFICATION >>>
 
-        event_lines.append(f"📅 {date}")
-        if cost:
-             event_lines.append(f"💰 {cost}")
+        event_lines.append(f"📅 {date}") # Date always shown
 
+        # Distance and Direction (logic remains the same)
         if "distance_km" in ev and postcode and user_lat is not None and user_lon is not None:
             try:
                 dist_km: float = float(ev["distance_km"])
                 arrow: str = ""
-                lat_val = ev.get("latitude")
-                lon_val = ev.get("longitude")
-                if lat_val is not None and lon_val is not None:
-                     ev_lat = float(lat_val)
-                     ev_lon = float(lon_val)
-                     bearing: float = calculate_bearing(user_lat, user_lon, ev_lat, ev_lon)
-                     arrow = bearing_to_arrow(bearing) + " "
-
+                ev_lat: float = float(ev.get("latitude")) if ev.get("latitude") is not None else math.nan
+                ev_lon: float = float(ev.get("longitude")) if ev.get("longitude") is not None else math.nan
+                if not math.isnan(ev_lat) and not math.isnan(ev_lon):
+                    bearing: float = calculate_bearing(user_lat, user_lon, ev_lat, ev_lon)
+                    arrow = bearing_to_arrow(bearing) + " "
                 dist_str: str
-                if dist_km < 0.01: dist_str = "<10m"
-                elif dist_km < 0.1: dist_str = f"{round(dist_km * 1000)}m"
-                elif dist_km < 1: dist_str = f"{round(dist_km * 100)/100 * 1000:.0f}m"
+                if dist_km < 0.1: dist_str = f"{round(dist_km * 1000)}m"
                 elif dist_km < 10: dist_str = f"{dist_km:.1f}km"
-                else: dist_str = f"{round(dist_km)}km"
-
+                else: dist_str = f"{dist_km:.0f}km"
                 event_lines.append(f"🧭 <i>{dist_str} {arrow}from {postcode.upper()}</i>")
-            except (ValueError, TypeError, KeyError, AttributeError) as e:
+            except (ValueError, TypeError, KeyError) as e:
                  logger.warning(f"Error processing distance/bearing for event {ev.get('event_id')}: {e}", exc_info=False)
 
         lines.append("\n".join(event_lines))
@@ -565,38 +475,53 @@ def create_event_keyboard(
     can_go_back: bool,
     is_currently_expanded: bool
 ) -> ta.Optional[ta.Dict[str, ta.Any]]:
-    """Creates the inline keyboard. Uses NEW fields for toggle check."""
+    """
+    Creates the inline keyboard with relevant buttons based on context.
+    Button order: Back | Toggle | Refresh | Map | Forward
+    """
     button_row: ta.List[ta.Dict[str, str]] = []
 
-    summary = (event.get("card_blurb") or "").strip()
-    vibes = (event.get("card_vibes") or "").strip()
-    has_details_to_toggle = bool(summary or vibes)
+    # Check if there are details (summary or vibes) to toggle
+    summary = (event.get("pretty_description") or "").strip()
+    vibes = (event.get("vibes") or "").strip()
+    has_details_to_toggle = bool(summary or vibes) # Toggle if either exists
 
+    # --- Define and Add Buttons in Order ---
+
+    # 1. Back Button (Conditional)
     if can_go_back:
         button_row.append({"text": "⏪", "callback_data": "show_previous"})
 
-    if has_details_to_toggle:
-        button_text = "➖ Less" if is_currently_expanded else "➕ More"
-        callback_action = "toggle_details_hide" if is_currently_expanded else "toggle_details_show"
-        button_row.append({"text": button_text, "callback_data": callback_action})
+    # 2. Toggle Button (Show More/Less) - Conditional
+    if has_details_to_toggle: # Only show if there are details to toggle
+        if is_currently_expanded:
+            # Currently expanded -> show "Less" button '➖'
+            button_row.append({"text": "➖", "callback_data": "toggle_details_hide"})
+        else:
+            # Currently collapsed -> show "More" button '➕'
+            button_row.append({"text": "➕", "callback_data": "toggle_details_show"})
 
+    # 3. Refresh Button
     button_row.append({"text": "🔄", "callback_data": refresh_callback_data})
 
-    venue_name: ta.Optional[str] = event.get("venue_name")
+    # 4. Map Button (Conditional)
+    venue_name: ta.Optional[str] = event.get("pretty_venue_name")
     venue_postcode: ta.Optional[str] = event.get("postcode")
     if venue_name and venue_postcode:
         try:
             search_query: str = f"{venue_name}, {venue_postcode}"
-            maps_url: str = f"https://www.google.com/maps/search/?api=1&query={urllib.parse.quote_plus(search_query)}"
+            maps_url: str = f"https://www.google.com/maps/search/?api=1&query={urllib.parse.quote_plus(search_query)}" # Use HTTPS
             button_row.append({"text": "📍", "url": maps_url})
         except Exception as e: logger.error(f"Error creating map link: {e}")
 
+    # 5. Forward Button
     try:
         forward_text: str = format_event_for_forwarding(event)
         button_row.append({"text": "📤", "switch_inline_query": forward_text or "Check out this event!"})
     except Exception as e:
         logger.error(f"Error formatting event for forwarding: {e}")
 
+    # --- Construct Keyboard ---
     if button_row:
         return {"inline_keyboard": [button_row]}
     else:
@@ -623,11 +548,12 @@ def get_user_location(chat_id: str) -> ta.Tuple[ta.Optional[str], ta.Optional[fl
 
 def handle_single_event_command(chat_id: str, command: str) -> None:
     """Handles commands that fetch and display a single event with refresh."""
+    # Map command to callback data, display context, and location requirement
     command_config = {
         "/local": {"cb": "load_local", "ctx": "nearby", "loc": True, "days": 7},
         "/today": {"cb": "load_today", "ctx": "today", "loc": True, "days": 0},
         "/tomorrow": {"cb": "load_tomorrow", "ctx": "tomorrow", "loc": True, "days": 1},
-        "/weekend": {"cb": "load_weekend", "ctx": "this weekend", "loc": True},
+        "/weekend": {"cb": "load_weekend", "ctx": "this weekend", "loc": True}, # Weekend specific
         "/random": {"cb": "load_random", "ctx": "a random event", "loc": False},
         "/best": {"cb": "load_best", "ctx": "a top pick", "loc": False},
     }
@@ -641,10 +567,14 @@ def handle_single_event_command(chat_id: str, command: str) -> None:
     time_period_context: str = config["ctx"]
     is_location_based: bool = config["loc"]
 
-    user_pc: ta.Optional[str] = None; lat: ta.Optional[float] = None; lon: ta.Optional[float] = None
-    fetch_params: ta.Dict[str, ta.Any] = {}; events: ta.List[ta.Dict[str, ta.Any]] = []
+    user_pc: ta.Optional[str] = None
+    lat: ta.Optional[float] = None
+    lon: ta.Optional[float] = None
+    fetch_params: ta.Dict[str, ta.Any] = {}
+    events: ta.List[ta.Dict[str, ta.Any]] = []
     no_event_context: str = ""
 
+    # --- Get Location if Required ---
     if is_location_based:
         user_pc, lat, lon = get_user_location(chat_id)
         if not user_pc: send_telegram_message(chat_id, LOCATION_PROMPT_MESSAGE); return
@@ -652,79 +582,95 @@ def handle_single_event_command(chat_id: str, command: str) -> None:
         fetch_params.update({"user_lat": lat, "user_lon": lon})
         no_event_context = f"near {user_pc.upper()}"
 
+    # --- Calculate Date Range and Fetch Events ---
     try:
-        today_date = datetime.now(timezone.utc).date()
+        today_dt: datetime.datetime = datetime.datetime.utcnow()
+        today_date: datetime.date = today_dt.date()
 
         if command == "/weekend":
-            today_weekday = today_date.weekday()
+            # Calculate upcoming Saturday and Monday (for range end)
+            today_weekday = today_date.weekday() # Monday is 0, Sunday is 6
             days_until_saturday = (5 - today_weekday + 7) % 7
-            saturday_date = today_date + timedelta(days=days_until_saturday)
-            monday_date = saturday_date + timedelta(days=2)
+            saturday_date = today_date + datetime.timedelta(days=days_until_saturday)
+            monday_date = saturday_date + datetime.timedelta(days=2) # End date is exclusive
+
             fetch_params["date_from"] = saturday_date.strftime("%Y-%m-%d")
             fetch_params["date_to"] = monday_date.strftime("%Y-%m-%d")
-            no_event_context = f"starting this weekend {no_event_context}".strip()
+            no_event_context = f"this weekend {no_event_context}".strip()
             events = fetch_events(overall_limit=1, **fetch_params)
 
         elif command in ["/local", "/today", "/tomorrow"]:
             days_offset = config.get("days", 0)
-            start_date = today_date + timedelta(days=days_offset)
-            if command == "/local":
-                end_date = start_date + timedelta(days=7)
-                no_event_context = f"starting in the next 7 days {no_event_context}".strip()
-            else: # Today or Tomorrow: range is single day
-                end_date = start_date + timedelta(days=1)
-                # Use the specific day as context string
-                no_event_context = f"starting {time_period_context} {no_event_context}".strip()
-            # For single day fetch, set date_to = date_from + 1 day
+            start_date = today_date + datetime.timedelta(days=days_offset)
+            if command == "/local": # Special case for 7-day range
+                end_date = start_date + datetime.timedelta(days=7)
+                no_event_context = f"in the next 7 days {no_event_context}".strip()
+            else: # Today or Tomorrow
+                end_date = start_date + datetime.timedelta(days=1)
+                no_event_context = f"{time_period_context} {no_event_context}".strip()
+
             fetch_params["date_from"] = start_date.strftime("%Y-%m-%d")
             fetch_params["date_to"] = end_date.strftime("%Y-%m-%d")
-
             events = fetch_events(overall_limit=1, **fetch_params)
 
         elif command in ["/random", "/best"]:
             events = fetch_random_events(days_ahead=DEFAULT_RANDOM_DAYS_AHEAD, limit=1)
-            no_event_context = "matching that criteria"
+            no_event_context = "matching that criteria" # Generic
 
+        # --- Process fetched events ---
         event: ta.Optional[ta.Dict[str, ta.Any]] = events[0] if events else None
 
         if not event:
-            base_msg = NO_EVENTS_MESSAGE.format(context=no_event_context, postcode=user_pc.upper() if user_pc else "your area")
-            suggestion_map = {
-                 "/today": "\nMaybe try /tomorrow or /weekend?", "/tomorrow": "\nMaybe try /weekend or /local?",
-                 "/weekend": "\nMaybe try /local for upcoming week?", "/local": "\nMaybe try /random?",
-                 "/best": "\nMaybe try /local or /random?" }
-            suggestion = suggestion_map.get(command, "")
-            send_telegram_message(chat_id, base_msg + suggestion); return
+            base_msg = NO_EVENTS_MESSAGE.format(
+                context=no_event_context,
+                postcode=user_pc.upper() if user_pc else "your area"
+            )
+            suggestion = ""
+            if command == "/today":
+                suggestion = "\nMaybe try /tomorrow or /weekend?"
+            elif command == "/tomorrow":
+                suggestion = "\nMaybe try /weekend or /local?"
+            elif command == "/weekend":
+                suggestion = "\nMaybe try /local for all upcoming?"
+            elif command == "/local":  # User already tried broad search
+                suggestion = "\nMaybe try /random to see what else is on?"
+            elif command == "/best":
+                suggestion = "\nMaybe try /local or /random?"
 
-        if lat is not None and lon is not None:
+            send_telegram_message(chat_id, base_msg + suggestion)
+            return
+
+        # Add distance if user location known
+        user_pc_dist, lat_dist, lon_dist = get_user_location(chat_id)
+        if lat_dist is not None and lon_dist is not None:
              try:
-                 lat_val = event.get("latitude"); lon_val = event.get("longitude")
-                 if lat_val is not None and lon_val is not None:
-                     ev_lat = float(lat_val); ev_lon = float(lon_val)
-                     event["distance_km"] = haversine_distance(lat, lon, ev_lat, ev_lon)
-             except (ValueError, TypeError) as e: logger.warning(f"Could not calculate distance in command {command}: {e}")
+                 ev_lat = float(event.get("latitude", math.nan)); ev_lon = float(event.get("longitude", math.nan))
+                 if not math.isnan(ev_lat) and not math.isnan(ev_lon): event["distance_km"] = haversine_distance(lat_dist, lon_dist, ev_lat, ev_lon)
+             except: pass
 
     except Exception as e:
         logger.error(f"Error fetching event for command {command}: {e}", exc_info=True)
         send_telegram_message(chat_id, DEFAULT_ERROR_MESSAGE); return
 
+    # --- Send the event message ---
     try:
-        keyboard = create_event_keyboard( event=event, refresh_callback_data=callback_data, can_go_back=False, is_currently_expanded=False )
-        message_text = format_events_message( events=[event], time_period=time_period_context, postcode=user_pc, user_lat=lat, user_lon=lon, show_details=False )
-
+        keyboard = create_event_keyboard(event, callback_data, can_go_back=False, is_currently_expanded=False)
+        message_text = format_events_message(
+            events=[event], time_period=time_period_context,
+            postcode=user_pc, user_lat=lat, user_lon=lon, show_details=False
+        )
+        # Use helper to get message_id for history
         sent_message_api_response = _telegram_api_request("sendMessage", {
              "chat_id": str(chat_id), "text": message_text, "parse_mode": "HTML",
              "disable_web_page_preview": True, "reply_markup": json.dumps(keyboard if keyboard else {})
          })
-
-        if sent_message_api_response and sent_message_api_response.get('ok') and isinstance(sent_message_api_response.get("result"), dict) and (msg_id := sent_message_api_response["result"].get('message_id')):
+        # Initialize History
+        if sent_message_api_response and isinstance(sent_message_api_response.get("result"), dict) and (msg_id := sent_message_api_response["result"].get('message_id')):
             history_key = (str(chat_id), msg_id)
             message_event_history[history_key] = deque([event.copy()], maxlen=HISTORY_SIZE)
             message_context_type[history_key] = callback_data
-            message_expansion_state[history_key] = False
-            logger.info(f"Initialized history and state for msg {msg_id} in chat {chat_id} via command {command}")
-        else: logger.error(f"Failed to get message_id after sending {command}. API Response: {sent_message_api_response}")
-
+            logger.info(f"Initialized history for msg {msg_id} in chat {chat_id} with event {event.get('event_id')}")
+        else: logger.error(f"Failed to get message_id after sending {command} command to {chat_id}. API Response: {sent_message_api_response}")
     except Exception as e:
         logger.error(f"Error formatting/sending event for command {command}: {e}", exc_info=True)
         send_telegram_message(chat_id, DEFAULT_ERROR_MESSAGE)
@@ -750,7 +696,7 @@ def handle_refresh_callback(chat_id: str, message_id: int, callback_data: str) -
         fetch_params.update({"user_lat": lat, "user_lon": lon}); no_event_context = f"near {user_pc.upper()}"
 
     # --- Determine Fetch Dates/Context ---
-    today_dt: datetime = datetime.utcnow()
+    today_dt: datetime.datetime = datetime.datetime.utcnow()
     today_date: datetime.date = today_dt.date() # Use only date part for calculations
 
     if callback_data == "load_local":
@@ -842,31 +788,33 @@ def send_event_messages(
     user_lat: ta.Optional[float] = None,
     user_lon: ta.Optional[float] = None
 ):
-    """Send each event as an individual message using updated formatter."""
+    """Send each event as an individual message, passing location info for formatting."""
     if not events:
          logger.info(f"No events provided to send_event_messages for chat {chat_id}.")
+         # Callers should handle the "no events found" message themselves
          return
 
     for event in events:
-        # Calls the updated format_events_message
+        # Call format_events_message to format one event at a time
         message = format_events_message(
             events=[event],
             postcode=postcode,
             user_lat=user_lat,
             user_lon=user_lon,
-            show_details=False # Default to collapsed for individual sends
         )
         if message:
-            # Send message WITHOUT reply_markup
-            send_telegram_message(chat_id, message, reply_markup=None)
-            time.sleep(SLEEP_TIME_LENGTH)
+            # Send message WITHOUT reply_markup (no buttons)
+            send_telegram_message(chat_id, message)
+            time.sleep(SLEEP_TIME_LENGTH)  # Keep delay between messages
         else:
             logger.warning(f"Empty message generated by format_events_message for event: {event.get('event_id', 'N/A')}")
+
 
 # --- Main Message Processing Logic ---
 
 def process_message(msg: ta.Dict[str, ta.Any]) -> None:
     """Handles incoming text messages and commands."""
+    # ... (initial setup, chat info, user info, text processing) ...
     chat_info: ta.Dict[str, ta.Any] = msg.get('chat', {})
     chat_id: str = str(chat_info.get('id', ''))
     chat_type: str = chat_info.get('type', '')
@@ -877,13 +825,7 @@ def process_message(msg: ta.Dict[str, ta.Any]) -> None:
     text_raw: str = (msg.get('text') or '').strip()
     text_lower: str = text_raw.lower()
     logger.info(f"Processing message from chat {chat_id} (user: {user_id}): '{text_raw}'")
-
-    # Keep original try/except around DB operation
-    try:
-        upsert_chat_info(chat_id, chat_type, user_info)
-    except Exception as e:
-         logger.error(f"DB error in upsert_chat_info for {chat_id}: {e}", exc_info=False) # Log DB error but continue
-
+    upsert_chat_info(chat_id, chat_type, user_info)
 
     if text_lower == "/start":
         awaiting_location_update[chat_id] = False
@@ -892,132 +834,213 @@ def process_message(msg: ta.Dict[str, ta.Any]) -> None:
 
     if text_lower in ["/help", "help", "hello", "hi", "?"]:
         awaiting_location_update[chat_id] = False
-        try:
-            # Keep original try/except around timezone operation
-            now_london = datetime.now(ZoneInfo("Europe/London"))
-            weekday = now_london.weekday()
-            greetings = { 4: "Happy Friday! 🎉 Looking for weekend events?\n\n", 5: "Hope you're having a great weekend! 😎\n\n", 6: "Hope you're having a great weekend! 😎\n\n", 0: "Morning! Hope you had a good weekend. Planning your week?\n\n"}
-            greeting = greetings.get(weekday, "Hi there! 👋 Let's find some events.\n\n")
-        except Exception as e: # Catch potential ZoneInfo errors
-             logger.warning(f"ZoneInfo lookup failed: {e}")
-             greeting = "Hi there! 👋 Let's find some events.\n\n"
-        send_telegram_message(chat_id, greeting + help_text_commands)
-        return
 
+        # --- Day-specific greeting ---
+        now_utc = datetime.datetime.utcnow()
+        london_tz = ZoneInfo("Europe/London")
+        now_london = now_utc.astimezone(london_tz)
+        weekday = now_london.weekday()
+
+        greeting = ""
+        if weekday == 4:  # Friday
+            greeting = "Happy Friday! 🎉 Looking for weekend events?\n\n"
+        elif weekday == 5 or weekday == 6:
+            greeting = "Hope you're having a great weekend! 😎\n\n"
+        elif weekday == 0:
+            greeting = "Morning! Hope you had a good weekend. Planning your week?\n\n"
+        else:  # Tuesday, Wednesday, Thursday
+            greeting = "Hi there! 👋 Let's find some events.\n\n"
+
+        # Prepend greeting to the standard help text
+        full_help_message = greeting + help_text_commands
+        send_telegram_message(chat_id, full_help_message)
+        return
     if text_lower == "/updatelocation":
         awaiting_location_update[chat_id] = True
-        send_telegram_message(chat_id, "OK. Please send me your London postcode (e.g., SW1A 0AA).")
-        return
-
-    if text_lower == "/subscribe":
+        send_telegram_message(chat_id, "OK. Please send me your London postcode (e.g., SW1A 0AA)."); return
+    elif text_lower == "/subscribe":
         if chat_type == 'private':
             awaiting_location_update[chat_id] = False
             logger.info(f"Processing /subscribe for chat {chat_id}")
-            try: # Keep original try/except around DB operation
-                supabase.table("telegram_subscribers").upsert({"chat_id": str(chat_id),"subscribed_date": datetime.now(timezone.utc).isoformat()}, on_conflict="chat_id").execute()
+            try:
+                # Explicitly add user to subscribers table on command
+                supabase.table("telegram_subscribers").upsert({
+                    "chat_id": str(chat_id),
+                    "subscribed_date": datetime.datetime.utcnow().isoformat()
+                }, on_conflict="chat_id").execute()
+                # Send confirmation ONLY on success
                 send_telegram_message(chat_id, "✅ You've subscribed to the weekly roundup!")
             except Exception as e:
                 logger.error(f"Error subscribing chat {chat_id}: {e}", exc_info=True)
                 send_telegram_message(chat_id, "⚠️ Sorry, there was an error trying to subscribe you.")
         else:
+            # Ignore /subscribe command in group chats
             send_telegram_message(chat_id, "Subscription commands only work in a private chat with me.")
         return
-
-    if text_lower == "/unsubscribe":
-        if chat_type == 'private':
+    elif text_lower == "/unsubscribe":
+        if chat_type == 'private': # Only works in private chat
             awaiting_location_update[chat_id] = False
-            # Keep original helper call (which has try/except)
+            # Calls the helper function to perform the action
             if unsubscribe_user(chat_id):
-                send_telegram_message(chat_id, "You've been unsubscribed from the weekly roundup.")
+                send_telegram_message(chat_id, "You've been unsubscribed from the weekly roundup.") # Success feedback
             else:
-                send_telegram_message(chat_id, "Sorry, there was an error trying to unsubscribe.")
+                send_telegram_message(chat_id, "Sorry, there was an error trying to unsubscribe.") # Error feedback
         else:
             send_telegram_message(chat_id, "Subscription commands only work in a private chat with me.")
-        return
+        return # Stop further processing
 
     # --- Single Event Commands ---
-    # Calls the updated handle_single_event_command implicitly
-    if text_lower in ["/local", "/today", "/tomorrow", "/weekend", "/random", "/best"]:
+    single_event_command_map = {
+        "/local": ("load_local", "nearby", True),
+        "/today": ("load_today", "today", True),
+        "/tomorrow": ("load_tomorrow", "tomorrow", True),
+        "/weekend": ("load_weekend", "this weekend", True),
+        "/random": ("load_random", "a random event", False),
+        "/best": ("load_best", "a top pick", False),
+    }
+    if text_lower in single_event_command_map:
         awaiting_location_update[chat_id] = False
-        handle_single_event_command(chat_id, text_lower)
+        callback_data, time_period_context, is_location_based = single_event_command_map[text_lower]
+        user_pc: ta.Optional[str] = None; lat: ta.Optional[float] = None; lon: ta.Optional[float] = None
+        event: ta.Optional[ta.Dict[str, ta.Any]] = None; events: ta.List[ta.Dict[str, ta.Any]] = []
+        no_event_context: str = ""
+        # Get location if needed
+        if is_location_based:
+            user_pc, lat, lon = get_user_location(chat_id)
+            if not user_pc: send_telegram_message(chat_id, LOCATION_PROMPT_MESSAGE); return
+            if lat is None or lon is None: send_telegram_message(chat_id, GEOCODE_ERROR_MESSAGE.format(postcode=user_pc)); return
+            no_event_context = f"near {user_pc.upper()}"
+        # Fetch the event
+        try:
+            # ... (fetch logic based on text_lower remains the same) ...
+            if text_lower == "/local":
+                 fetch_params = {"date_from": datetime.datetime.utcnow().strftime("%Y-%m-%d"), "date_to": (datetime.datetime.utcnow() + datetime.timedelta(days=7)).strftime("%Y-%m-%d"), "user_lat": lat, "user_lon": lon}
+                 no_event_context = f"in the next 7 days {no_event_context}".strip()
+                 events = fetch_events(overall_limit=1, **fetch_params)
+            elif text_lower == "/today":
+                 today_str = datetime.datetime.utcnow().strftime("%Y-%m-%d")
+                 fetch_params = {"date_from": today_str, "date_to": today_str, "user_lat": lat, "user_lon": lon}
+                 no_event_context = f"today {no_event_context}".strip()
+                 events = fetch_events(overall_limit=1, **fetch_params)
+            elif text_lower == "/tomorrow":
+                 tomorrow_str = (datetime.datetime.utcnow() + datetime.timedelta(days=1)).strftime("%Y-%m-%d")
+                 fetch_params = {"date_from": tomorrow_str, "date_to": tomorrow_str, "user_lat": lat, "user_lon": lon}
+                 no_event_context = f"tomorrow {no_event_context}".strip()
+                 events = fetch_events(overall_limit=1, **fetch_params)
+            elif text_lower == "/random" or text_lower == "/best":
+                 events = fetch_random_events(days_ahead=DEFAULT_RANDOM_DAYS_AHEAD, limit=1)
+                 no_event_context = "matching that criteria"
+            # Check results and add distance
+            if events:
+                event = events[0]
+                user_pc_dist, lat_dist, lon_dist = get_user_location(chat_id)
+                if lat_dist is not None and lon_dist is not None:
+                     try: # Add distance if possible
+                         ev_lat = float(event.get("latitude", math.nan)); ev_lon = float(event.get("longitude", math.nan))
+                         if not math.isnan(ev_lat) and not math.isnan(ev_lon): event["distance_km"] = haversine_distance(lat_dist, lon_dist, ev_lat, ev_lon)
+                     except: pass
+            else: send_telegram_message(chat_id, NO_EVENTS_MESSAGE.format(context=no_event_context, postcode=user_pc.upper() if user_pc else "your area")); return
+        except Exception as e: logger.error(f"Error fetching event for {text_lower}: {e}", exc_info=True); send_telegram_message(chat_id, DEFAULT_ERROR_MESSAGE); return
+
+        # Send the event message
+        if event:
+            try:
+                # Initial state is always collapsed, cannot go back
+                keyboard = create_event_keyboard(
+                    event=event,
+                    refresh_callback_data=callback_data,
+                    can_go_back=False,
+                    is_currently_expanded=False  # Initial state is collapsed
+                )
+                message_text = format_events_message(
+                    events=[event],
+                    time_period=time_period_context,
+                    postcode=user_pc, user_lat=lat, user_lon=lon,
+                    show_details=False  # Initial state is collapsed
+                )
+
+                sent_message_api_response = _telegram_api_request("sendMessage", {
+                    "chat_id": str(chat_id), "text": message_text, "parse_mode": "HTML",
+                    "disable_web_page_preview": True, "reply_markup": json.dumps(keyboard if keyboard else {})
+                })
+
+                # Initialize History AND Expansion State
+                if sent_message_api_response and isinstance(sent_message_api_response.get("result"), dict) and (
+                msg_id := sent_message_api_response["result"].get('message_id')):
+                    history_key = (str(chat_id), msg_id)
+                    # Store event copy, context type, and initial expansion state
+                    message_event_history[history_key] = deque([event.copy()], maxlen=HISTORY_SIZE)
+                    message_context_type[history_key] = callback_data
+                    message_expansion_state[history_key] = False  # <<<<< ADDED: Initialize state as collapsed
+                    logger.info(f"Initialized history and state for msg {msg_id} in chat {chat_id}")
+                else:
+                    logger.error(
+                        f"Failed to get message_id after sending {text_lower} command to {chat_id}. API Response: {sent_message_api_response}")
+
+            except Exception as e:
+                logger.error(f"Error formatting/sending event for command {text_lower}: {e}", exc_info=True)
+                send_telegram_message(chat_id, DEFAULT_ERROR_MESSAGE)
         return
 
     # --- Postcode Handling ---
     elif is_valid_london_postcode(text_raw.upper()):
+        # ... (postcode handling logic remains the same) ...
         postcode_norm: str = text_raw.upper()
-        is_updating = awaiting_location_update.get(chat_id, False)
-        pc_lat, pc_lon = None, None
-
-        # Keep original try/except around geocoding
-        try: pc_lat, pc_lon = geocode_postcode_to_latlon(postcode_norm)
-        except Exception as e: logger.error(f"Geocoding error for '{postcode_norm}': {e}")
-
-        if is_updating:
-            if pc_lat is not None and pc_lon is not None:
-                # Keep original helper call (which has try/except)
-                if set_user_postcode(chat_id, postcode_norm):
-                    send_telegram_message(chat_id, f"✅ Location updated to {postcode_norm}!")
+        if awaiting_location_update.get(chat_id, False):
+            lat_check, lon_check = geocode_postcode_to_latlon(postcode_norm)
+            if lat_check is not None and lon_check is not None:
+                if set_user_postcode(chat_id, postcode_norm): send_telegram_message(chat_id, f"✅ Location updated to {postcode_norm}!")
                 else: send_telegram_message(chat_id, "⚠️ There was an error saving your postcode.")
-            else: send_telegram_message(chat_id, f"⚠️ Couldn't validate postcode {postcode_norm}. Please try a different London postcode.")
+            else: send_telegram_message(chat_id, f"⚠️ Couldn't find coordinates for {postcode_norm}. Please try a different London postcode.")
             awaiting_location_update[chat_id] = False
-        else: # Not updating, treat as a search
-            if pc_lat is not None and pc_lon is not None:
-                send_telegram_message(chat_id, f"OK, looking for events near {postcode_norm}...")
-                today_dt_pc = datetime.now(timezone.utc)
-                # Calls updated fetch_events
-                events_pc: ta.List[ta.Dict[str, ta.Any]] = fetch_events(
-                    date_from=today_dt_pc.strftime("%Y-%m-%d"),
-                    date_to=(today_dt_pc + timedelta(days=7)).strftime("%Y-%m-%d"),
-                    user_lat=pc_lat, user_lon=pc_lon, overall_limit=5
-                )
-                if events_pc:
-                    # Calls updated send_event_messages (which calls updated formatter)
-                    send_event_messages( chat_id=chat_id, events=events_pc, postcode=postcode_norm, user_lat=pc_lat, user_lon=pc_lon )
-                else:
-                    # Updated context string to mention "starting"
-                    send_telegram_message(chat_id, f"Couldn't find any events starting near {postcode_norm} in the next 7 days.")
-            else: send_telegram_message(chat_id, f"Sorry, I couldn’t find coordinates for {postcode_norm}.")
-        return
+        else:
+            lat_pc, lon_pc = geocode_postcode_to_latlon(postcode_norm)
+            if not lat_pc or not lon_pc: send_telegram_message(chat_id, f"Sorry, I couldn’t find coordinates for {postcode_norm}."); return
+            send_telegram_message(chat_id, f"OK, looking for events near {postcode_norm}...")
+            today_dt_pc: datetime.datetime = datetime.datetime.utcnow()
+            events_pc: ta.List[ta.Dict[str, ta.Any]] = fetch_events(
+                date_from=today_dt_pc.strftime("%Y-%m-%d"),
+                date_to=(today_dt_pc + datetime.timedelta(days=7)).strftime("%Y-%m-%d"),
+                user_lat=lat_pc, user_lon=lon_pc, overall_limit=5
+            )
+            if events_pc: send_event_messages( chat_id=chat_id, events=events_pc, postcode=postcode_norm, user_lat=lat_pc, user_lon=lon_pc )
+            else: send_telegram_message(chat_id, f"Couldn't find any events near {postcode_norm} in the next 7 days.")
+        return # End postcode processing
 
     # --- Fallback ---
     else:
         if not awaiting_location_update.get(chat_id, False):
-            send_telegram_message(chat_id, "Sorry, I didn't understand that. Try /help for commands.")
+            full_help_message = "Sorry, I didn't understand that.\n\n" + help_text_commands
+            send_telegram_message(chat_id, full_help_message)
 
 
 def process_callback_query(callback_query: ta.Dict[str, ta.Any]) -> None:
-    """Handles incoming callback queries using updated fetch/format logic."""
+    """Handles incoming callback queries."""
     query_id: ta.Optional[str] = callback_query.get('id')
     message: ta.Optional[ta.Dict[str, ta.Any]] = callback_query.get('message')
-    data: ta.Optional[str] = callback_query.get('data') # The callback_data string
+    data: ta.Optional[str] = callback_query.get('data')
 
     if not query_id or not message or not data:
-        logger.warning("Received incomplete callback query: %s", callback_query)
+        logger.warning("Received incomplete callback query.")
         if query_id: answer_callback_query(query_id)
         return
 
     chat_id: str = str(message.get('chat', {}).get('id', ''))
     message_id: ta.Optional[int] = message.get('message_id')
 
-    # Keep original try/except around acknowledgement
-    try:
-        answer_callback_query(query_id)
-    except Exception as e:
-         logger.error(f"Failed to acknowledge callback query {query_id}: {e}")
-         # Continue processing regardless? Or return? Let's continue.
+    answer_callback_query(query_id) # Acknowledge first
 
     if not chat_id or not message_id:
         logger.error(f"Could not get chat_id/message_id from callback {query_id}"); return
 
     history_key = (chat_id, message_id)
-    logger.info(f"Processing callback '{data}' for msg {message_id} in chat {chat_id}")
 
     # --- Route Callback Data ---
 
-    # --- Refresh Actions (load_...) ---
+    # --- Refresh Actions ---
     if data.startswith("load_"):
-        # Keep original try/except around the core logic for this callback type
         try:
+            # ----- Refresh Logic Inline -----
             fetch_params: ta.Dict[str, ta.Any] = {}
             user_pc: ta.Optional[str] = None; lat: ta.Optional[float] = None; lon: ta.Optional[float] = None
             fetch_limit: int = DEFAULT_EVENT_FETCH_LIMIT
@@ -1026,169 +1049,184 @@ def process_callback_query(callback_query: ta.Dict[str, ta.Any]) -> None:
             time_period_context: str = ""; no_event_context: str = ""
             event_to_show: ta.Optional[ta.Dict[str, ta.Any]] = None; fetched_events: ta.List[ta.Dict[str, ta.Any]] = []
 
-            if is_location_based:
+            if is_location_based: # Get location if needed
                 user_pc, lat, lon = get_user_location(chat_id)
                 if not user_pc: edit_telegram_message(chat_id, message_id, LOCATION_PROMPT_MESSAGE, None); return
                 if lat is None or lon is None: edit_telegram_message(chat_id, message_id, GEOCODE_ERROR_MESSAGE.format(postcode=user_pc), None); return
                 fetch_params.update({"user_lat": lat, "user_lon": lon}); no_event_context = f"near {user_pc.upper()}"
 
-            # Define date ranges based on callback data for fetch_events
-            date_from_str: ta.Optional[str] = None
-            date_to_str: ta.Optional[str] = None # Exclusive end for fetch_events range logic
-            today_date = datetime.now(timezone.utc).date()
+            # Determine Fetch Dates/Context (logic remains same)
+            today_dt: datetime.datetime = datetime.datetime.utcnow(); today_date: datetime.date = today_dt.date()
+            if data == "load_local": fetch_params["date_from"] = today_date.strftime("%Y-%m-%d"); fetch_params["date_to"] = (today_date + datetime.timedelta(days=7)).strftime("%Y-%m-%d"); time_period_context = "nearby"; no_event_context = f"in the next 7 days {no_event_context}".strip()
+            elif data == "load_today": fetch_params["date_from"] = today_date.strftime("%Y-%m-%d"); fetch_params["date_to"] = today_date.strftime("%Y-%m-%d"); time_period_context = "today"; no_event_context = f"today {no_event_context}".strip()
+            elif data == "load_tomorrow": tomorrow_date = today_date + datetime.timedelta(days=1); fetch_params["date_from"] = tomorrow_date.strftime("%Y-%m-%d"); fetch_params["date_to"] = tomorrow_date.strftime("%Y-%m-%d"); time_period_context = "tomorrow"; no_event_context = f"tomorrow {no_event_context}".strip()
+            elif data == "load_weekend": today_weekday = today_date.weekday(); days_until_saturday = (5 - today_weekday + 7) % 7; saturday_date = today_date + datetime.timedelta(days=days_until_saturday); monday_date = saturday_date + datetime.timedelta(days=2); fetch_params["date_from"] = saturday_date.strftime("%Y-%m-%d"); fetch_params["date_to"] = monday_date.strftime("%Y-%m-%d"); time_period_context = "this weekend"; no_event_context = f"this weekend {no_event_context}".strip()
 
-            if data == "load_local":
-                date_from_str = today_date.strftime("%Y-%m-%d")
-                date_to_str = (today_date + timedelta(days=7)).strftime("%Y-%m-%d")
-                time_period_context = "nearby"; no_event_context = f"starting in the next 7 days {no_event_context}".strip()
-            elif data == "load_today":
-                date_from_str = today_date.strftime("%Y-%m-%d")
-                date_to_str = (today_date + timedelta(days=1)).strftime("%Y-%m-%d") # Range is today -> tomorrow morning
-                time_period_context = "today"; no_event_context = f"starting today {no_event_context}".strip()
-            elif data == "load_tomorrow":
-                tomorrow_date = today_date + timedelta(days=1)
-                date_from_str = tomorrow_date.strftime("%Y-%m-%d")
-                date_to_str = (tomorrow_date + timedelta(days=1)).strftime("%Y-%m-%d")
-                time_period_context = "tomorrow"; no_event_context = f"starting tomorrow {no_event_context}".strip()
-            elif data == "load_weekend":
-                today_weekday = today_date.weekday()
-                days_until_saturday = (5 - today_weekday + 7) % 7
-                saturday_date = today_date + timedelta(days=days_until_saturday)
-                monday_date = saturday_date + timedelta(days=2)
-                date_from_str = saturday_date.strftime("%Y-%m-%d")
-                date_to_str = monday_date.strftime("%Y-%m-%d")
-                time_period_context = "this weekend"; no_event_context = f"starting this weekend {no_event_context}".strip()
+            # Fetch event(s) (logic remains same)
+            if is_random or is_best: fetched_events = fetch_random_events(days_ahead=DEFAULT_RANDOM_DAYS_AHEAD, limit=fetch_limit); time_period_context = "a random event" if is_random else "a top pick"; no_event_context = "randomly" if is_random else "as a top pick"
+            elif is_location_based: fetched_events = fetch_events(overall_limit=fetch_limit, **fetch_params)
+            else: logger.error(f"Unhandled callback type in refresh handler: {data}"); return
 
-            # Fetch event(s) using updated functions
-            if is_random or is_best:
-                fetched_events = fetch_random_events(days_ahead=DEFAULT_RANDOM_DAYS_AHEAD, limit=fetch_limit)
-                time_period_context = "a random event" if is_random else "a top pick"
-                no_event_context = "randomly" if is_random else "as a top pick"
-            elif is_location_based or data in ["load_local", "load_today", "load_tomorrow", "load_weekend"]:
-                 fetch_params["date_from"] = date_from_str
-                 fetch_params["date_to"] = date_to_str
-                 fetched_events = fetch_events(overall_limit=fetch_limit, **fetch_params)
-            else:
-                logger.error(f"Unhandled callback type in refresh handler: {data}"); return
-
-            # Select Event to Show (Try not to repeat)
-            history = message_event_history.get(history_key)
-            last_event_id = history[-1].get('event_id') if history else None
+            # Select Event to Show (logic remains same)
+            history = message_event_history.get(history_key); last_event_id = history[-1].get('event_id') if history else None
             if fetched_events:
                  potential_events = [e for e in fetched_events if e.get('event_id') != last_event_id]
                  event_to_show = random.choice(potential_events) if potential_events else fetched_events[0]
             logger.info(f"Refresh selected event {event_to_show.get('event_id') if event_to_show else 'None'}")
 
+            # Update message or show 'no events'
             if event_to_show:
                 user_pc_refresh, lat_refresh, lon_refresh = (user_pc, lat, lon) if is_location_based else get_user_location(chat_id)
-                if lat_refresh is not None and lon_refresh is not None:
+                if lat_refresh is not None and lon_refresh is not None: # Add distance
                     try:
-                        lat_val = event_to_show.get("latitude"); lon_val = event_to_show.get("longitude")
-                        if lat_val is not None and lon_val is not None:
-                             ev_lat=float(lat_val); ev_lon=float(lon_val)
-                             event_to_show["distance_km"] = haversine_distance(lat_refresh, lon_refresh, ev_lat, ev_lon)
-                    except (ValueError, TypeError) as e: logger.warning(f"Failed to add distance on refresh: {e}")
-
+                        ev_lat=float(event_to_show.get("latitude",math.nan)); ev_lon=float(event_to_show.get("longitude",math.nan))
+                        if not math.isnan(ev_lat) and not math.isnan(ev_lon): event_to_show["distance_km"] = haversine_distance(lat_refresh, lon_refresh, ev_lat, ev_lon)
+                    except: pass
+                # Update History
                 if history_key not in message_event_history: message_event_history[history_key] = deque(maxlen=HISTORY_SIZE)
                 message_event_history[history_key].append(event_to_show.copy())
                 if history_key not in message_context_type: message_context_type[history_key] = data
                 current_history_len = len(message_event_history[history_key])
                 logger.info(f"Appended history for msg {message_id}. New len: {current_history_len}")
 
-                current_state_expanded = message_expansion_state.get(history_key, False)
+                # ***** MODIFIED: Read current state and pass it *****
+                # Read the current expansion state for this message
+                current_state_expanded = message_expansion_state.get(history_key, False) # Default to collapsed
                 logger.info(f"Refresh for msg {message_id}: Preserving expansion state: {current_state_expanded}")
 
+                # Format and Edit
                 can_go_back = current_history_len > 1
-                # Use updated keyboard/formatter, passing current expansion state
-                keyboard = create_event_keyboard( event=event_to_show, refresh_callback_data=data, can_go_back=can_go_back, is_currently_expanded=current_state_expanded)
-                message_text = format_events_message( events=[event_to_show], postcode=user_pc_refresh, user_lat=lat_refresh, user_lon=lon_refresh, time_period=time_period_context, show_details=current_state_expanded)
-
+                keyboard = create_event_keyboard(
+                    event=event_to_show, refresh_callback_data=data,
+                    can_go_back=can_go_back,
+                    is_currently_expanded=current_state_expanded # <<< Pass current state
+                )
+                message_text = format_events_message(
+                    events=[event_to_show], postcode=user_pc_refresh, user_lat=lat_refresh, user_lon=lon_refresh,
+                    time_period=time_period_context,
+                    show_details=current_state_expanded # <<< Pass current state
+                )
+                # *** DO NOT update message_expansion_state here ***
                 if not edit_telegram_message(chat_id, message_id, message_text, reply_markup=keyboard):
                     logger.error(f"Edit failed for refresh callback {data} on msg {message_id}")
-            else:
-                # Use updated no event context string
-                final_no_event_msg = NO_EVENTS_MESSAGE.format(context=f"further events {no_event_context}", postcode=user_pc.upper() if user_pc else "your area")
+            else: # No event found
+                final_no_event_msg = NO_EVENTS_MESSAGE.format(context=f"further {no_event_context}", postcode=user_pc.upper() if user_pc else "your area")
                 edit_telegram_message(chat_id, message_id, final_no_event_msg, reply_markup=None)
         except Exception as e:
             logger.error(f"Error handling refresh callback {data}: {e}", exc_info=True)
-            # Keep original try/except around error notification
             try: edit_telegram_message(chat_id, message_id, DEFAULT_ERROR_MESSAGE, None)
             except Exception: pass
 
     # --- Back Action ---
     elif data == "show_previous":
+        logger.info(f"Processing 'show_previous' for msg {message_id} in chat {chat_id}")
         history = message_event_history.get(history_key)
         original_context = message_context_type.get(history_key)
 
         if history and len(history) > 1 and original_context:
-            # Keep original try/except around main logic for this action
             try:
-                history.pop()
-                event_to_show = history[-1]
+                history.pop() # Remove current
+                event_to_show = history[-1] # Get previous
                 can_go_back = len(history) > 1
                 user_pc_back, lat_back, lon_back = get_user_location(chat_id)
-                if lat_back is not None and lon_back is not None:
+                if lat_back is not None and lon_back is not None: # Add distance
                     try:
-                        lat_val = event_to_show.get("latitude"); lon_val = event_to_show.get("longitude")
-                        if lat_val is not None and lon_val is not None:
-                            ev_lat=float(lat_val); ev_lon=float(lon_val)
-                            event_to_show["distance_km"] = haversine_distance(lat_back, lon_back, ev_lat, ev_lon)
-                    except (ValueError, TypeError) as e: logger.warning(f"Failed to add distance on back action: {e}")
+                        ev_lat=float(event_to_show.get("latitude",math.nan)); ev_lon=float(event_to_show.get("longitude",math.nan))
+                        if not math.isnan(ev_lat) and not math.isnan(ev_lon): event_to_show["distance_km"] = haversine_distance(lat_back, lon_back, ev_lat, ev_lon)
+                    except: pass
 
-                current_state_expanded = message_expansion_state.get(history_key, False)
+                # ***** MODIFIED: Read current state and pass it *****
+                current_state_expanded = message_expansion_state.get(history_key, False) # Default to collapsed
                 logger.info(f"Back action for msg {message_id}: Preserving expansion state: {current_state_expanded}")
 
-                # Use updated keyboard/formatter, passing current expansion state
-                keyboard = create_event_keyboard( event=event_to_show, refresh_callback_data=original_context, can_go_back=can_go_back, is_currently_expanded=current_state_expanded)
-                message_text = format_events_message( events=[event_to_show], postcode=user_pc_back, user_lat=lat_back, user_lon=lon_back, show_details=current_state_expanded)
-
+                keyboard = create_event_keyboard(
+                    event=event_to_show, refresh_callback_data=original_context,
+                    can_go_back=can_go_back,
+                    is_currently_expanded=current_state_expanded # <<< Pass current state
+                )
+                message_text = format_events_message(
+                    events=[event_to_show], postcode=user_pc_back, user_lat=lat_back, user_lon=lon_back,
+                    show_details=current_state_expanded # <<< Pass current state
+                )
+                # *** DO NOT update message_expansion_state here ***
                 if not edit_telegram_message(chat_id, message_id, message_text, reply_markup=keyboard): logger.error(f"Edit failed for show_previous on msg {message_id}")
-            except IndexError: logger.error(f"History empty after pop for msg {message_id}"); edit_telegram_message(chat_id, message_id, DEFAULT_ERROR_MESSAGE, None)
             except Exception as e: logger.error(f"Error processing show_previous: {e}", exc_info=True); edit_telegram_message(chat_id, message_id, DEFAULT_ERROR_MESSAGE, None)
-        elif history and len(history) <= 1:
-            logger.info(f"Cannot go back further for msg {message_id}.")
-            # Keep original try/except around keyboard edit
-            try:
+        elif history and len(history) == 1: # At oldest
+            logger.info(f"Cannot go back further for msg {message_id}, already at oldest.")
+            try: # Just remove back button
                 event_to_show = history[-1]; original_context = message_context_type.get(history_key, "load_random")
-                current_state_expanded = message_expansion_state.get(history_key, False)
-                # Use updated keyboard function
-                keyboard = create_event_keyboard(event_to_show, original_context, can_go_back=False, is_currently_expanded=current_state_expanded)
+                current_state_expanded = message_expansion_state.get(history_key, False) # Read state
+                keyboard = create_event_keyboard(event_to_show, original_context, can_go_back=False, is_currently_expanded=current_state_expanded) # Pass state
                 _telegram_api_request("editMessageReplyMarkup", {"chat_id": chat_id, "message_id": message_id, "reply_markup": json.dumps(keyboard if keyboard else {})})
             except Exception as e: logger.error(f"Error editing keyboard for show_previous (at oldest): {e}", exc_info=True)
         else: logger.warning(f"Could not find history/context for 'show_previous' on msg {message_id}")
 
     # --- Toggle Actions ---
-    elif data in ["toggle_details_show", "toggle_details_hide"]:
+    elif data == "toggle_details_show":
+        logger.info(f"Processing 'toggle_details_show' for msg {message_id}")
         history = message_event_history.get(history_key)
         original_context = message_context_type.get(history_key)
 
         if history and original_context:
-            # Keep original try/except around main logic for this action
             try:
-                event_to_show = history[-1]
+                event_to_show = history[-1] # Get current event from history
                 can_go_back = len(history) > 1
-                show_details_new_state = (data == "toggle_details_show")
-
                 user_pc_toggle, lat_toggle, lon_toggle = get_user_location(chat_id)
+                # Ensure distance present
                 if lat_toggle is not None and lon_toggle is not None and "distance_km" not in event_to_show:
-                     try:
-                         lat_val = event_to_show.get("latitude"); lon_val = event_to_show.get("longitude")
-                         if lat_val is not None and lon_val is not None:
-                             ev_lat=float(lat_val); ev_lon=float(lon_val)
-                             event_to_show["distance_km"] = haversine_distance(lat_toggle, lon_toggle, ev_lat, ev_lon)
-                     except (ValueError, TypeError) as e: logger.warning(f"Failed to add distance on toggle: {e}")
-
-                # Use updated formatter/keyboard, passing NEW state
-                message_text = format_events_message( events=[event_to_show], postcode=user_pc_toggle, user_lat=lat_toggle, user_lon=lon_toggle, show_details=show_details_new_state)
-                keyboard = create_event_keyboard( event=event_to_show, refresh_callback_data=original_context, can_go_back=can_go_back, is_currently_expanded=show_details_new_state)
-
+                     try: ev_lat=float(event_to_show.get("latitude",math.nan)); ev_lon=float(event_to_show.get("longitude",math.nan)); event_to_show["distance_km"] = haversine_distance(lat_toggle, lon_toggle, ev_lat, ev_lon)
+                     except: pass
+                # Format message WITH full details
+                message_text = format_events_message(
+                    events=[event_to_show], postcode=user_pc_toggle, user_lat=lat_toggle, user_lon=lon_toggle,
+                    show_details=True # <<< Show details
+                )
+                # Create keyboard for the EXPANDED state
+                keyboard = create_event_keyboard(
+                    event=event_to_show, refresh_callback_data=original_context,
+                    can_go_back=can_go_back, is_currently_expanded=True # <<< State IS NOW expanded
+                )
+                # Edit message first
                 if edit_telegram_message(chat_id, message_id, message_text, reply_markup=keyboard):
-                    message_expansion_state[history_key] = show_details_new_state
-                    logger.info(f"Set expansion state to {show_details_new_state} for msg {message_id}")
-                else: logger.error(f"Edit failed for {data} on msg {message_id}")
-            except IndexError: logger.error(f"History empty for toggle on msg {message_id}"); edit_telegram_message(chat_id, message_id, DEFAULT_ERROR_MESSAGE, None)
-            except Exception as e: logger.error(f"Error processing {data}: {e}", exc_info=True); edit_telegram_message(chat_id, message_id, DEFAULT_ERROR_MESSAGE, None)
-        else: logger.warning(f"History/context not found for {data} on msg {message_id}")
+                    # ***** ADDED: Update state AFTER successful edit *****
+                    message_expansion_state[history_key] = True
+                    logger.info(f"Set expansion state to TRUE for msg {message_id}")
+                else: logger.error(f"Edit failed for toggle_details_show on msg {message_id}")
+            except Exception as e: logger.error(f"Error processing toggle_details_show: {e}", exc_info=True); edit_telegram_message(chat_id, message_id, DEFAULT_ERROR_MESSAGE, None)
+        else: logger.warning(f"History/context not found for toggle_details_show on msg {message_id}")
+
+    elif data == "toggle_details_hide":
+        logger.info(f"Processing 'toggle_details_hide' for msg {message_id}")
+        history = message_event_history.get(history_key)
+        original_context = message_context_type.get(history_key)
+
+        if history and original_context:
+            try:
+                event_to_show = history[-1] # Get current event
+                can_go_back = len(history) > 1
+                user_pc_toggle, lat_toggle, lon_toggle = get_user_location(chat_id)
+                # Ensure distance present
+                if lat_toggle is not None and lon_toggle is not None and "distance_km" not in event_to_show:
+                     try: ev_lat=float(event_to_show.get("latitude",math.nan)); ev_lon=float(event_to_show.get("longitude",math.nan)); event_to_show["distance_km"] = haversine_distance(lat_toggle, lon_toggle, ev_lat, ev_lon)
+                     except: pass
+                # Format message WITHOUT full details
+                message_text = format_events_message(
+                    events=[event_to_show], postcode=user_pc_toggle, user_lat=lat_toggle, user_lon=lon_toggle,
+                    show_details=False # <<< Hide details
+                )
+                # Create keyboard for the COLLAPSED state
+                keyboard = create_event_keyboard(
+                    event=event_to_show, refresh_callback_data=original_context,
+                    can_go_back=can_go_back, is_currently_expanded=False # <<< State IS NOW collapsed
+                )
+                # Edit message first
+                if edit_telegram_message(chat_id, message_id, message_text, reply_markup=keyboard):
+                    # ***** ADDED: Update state AFTER successful edit *****
+                    message_expansion_state[history_key] = False
+                    logger.info(f"Set expansion state to FALSE for msg {message_id}")
+                else: logger.error(f"Edit failed for toggle_details_hide on msg {message_id}")
+            except Exception as e: logger.error(f"Error processing toggle_details_hide: {e}", exc_info=True); edit_telegram_message(chat_id, message_id, DEFAULT_ERROR_MESSAGE, None)
+        else: logger.warning(f"History/context not found for toggle_details_hide on msg {message_id}")
 
     # --- Fallback ---
     else:
@@ -1197,84 +1235,63 @@ def process_callback_query(callback_query: ta.Dict[str, ta.Any]) -> None:
 # --- Broadcast Logic ---
 
 def broadcast_newsletter(n_events: int = DEFAULT_BROADCAST_LIMIT) -> None:
-    """Send weekly updates to subscribers using updated fetch/format."""
+    """Send weekly updates to subscribers."""
     subscribers: ta.List[ta.Dict[str, ta.Any]] = []
-    # Keep original try/except around fetching subscribers
     try:
         resp = supabase.table("telegram_subscribers").select("chat_id").execute()
-        subscribers = resp.data if resp and hasattr(resp, 'data') and isinstance(resp.data, list) else []
+        subscribers = resp.data if resp and hasattr(resp, 'data') else []
     except Exception as exc:
         logger.error(f"Error fetching subscribers for broadcast: {exc}", exc_info=True); return
 
     logger.info(f"Starting broadcast to {len(subscribers)} subscribers.")
-    sent_count: int = 0; failed_count: int = 0
-    today_date = datetime.now(timezone.utc).date()
-    # Define date range for the week ahead
-    today_str: str = today_date.strftime("%Y-%m-%d")
-    future_str: str = (today_date + timedelta(days=7)).strftime("%Y-%m-%d")
+    sent_count: int = 0
+    today_str: str = datetime.datetime.utcnow().strftime("%Y-%m-%d")
+    future_str: str = (datetime.datetime.utcnow() + datetime.timedelta(days=7)).strftime("%Y-%m-%d")
 
     for sub in subscribers:
         chat_id: ta.Optional[str] = sub.get("chat_id")
         if not chat_id: continue
 
-        # Keep original try/except around processing each subscriber
-        try:
-            user_pc, lat, lon = get_user_location(chat_id)
-            events_to_send: ta.List[ta.Dict[str, ta.Any]] = []
-            message_header: str = "🎉 Your Saturday Update!"
-            # Update context string to reflect fetch logic
-            time_period_str: str = "starting in the next 7 days"
-            postcode_for_msg: str = ""
+        user_pc: ta.Optional[str]; lat: ta.Optional[float]; lon: ta.Optional[float]
+        user_pc, lat, lon = get_user_location(chat_id)
+        events_to_send: ta.List[ta.Dict[str, ta.Any]] = []
+        message_header: str = f"🎉 Your Saturday Update!"
+        time_period_str: str = "in the next 7 days"
+        postcode_for_msg: str = "" # Only include postcode if used for fetch
 
-            if user_pc and lat is not None and lon is not None:
-                # Calls updated fetch_events
+        if user_pc:
+            if lat is not None and lon is not None: # Geocoded successfully
                 events_to_send = fetch_events(date_from=today_str, date_to=future_str, user_lat=lat, user_lon=lon, overall_limit=n_events)
-                message_header = f"📍 Your Saturday Update near {user_pc.upper()}!"
+                message_header = f"🎉 Your Saturday Update near {user_pc.upper()}!"
                 postcode_for_msg = user_pc
-            elif user_pc:
+            else: # Stored PC, but geocode failed
                  logger.warning(f"Failed geocode in broadcast for stored postcode '{user_pc}' (Chat ID: {chat_id}).")
                  message_header = f"⚠️ Couldn't use postcode {user_pc}. Showing random events."
                  time_period_str = "some random events"
-            else:
-                message_header = "📍 Set your location with /updatelocation for local events!\n\n🎉 Your Saturday Update!"
-                time_period_str = "some random events"
+        else: # No postcode stored
+            message_header = "📍 Set your location with /updatelocation for local events!\n\n🎉 Your Saturday Update!"
+            time_period_str = "some random events"
 
-            if not events_to_send: # Fetch random if needed
-                # Calls updated fetch_random_events
-                events_to_send = fetch_random_events(days_ahead=7, limit=n_events)
-                if "Update!" in message_header and "random events" not in message_header:
-                     message_header += " Showing random events instead."
-                elif "Update!" not in message_header: # If headers were errors
-                     message_header += "\nShowing some random events:"
+        if not events_to_send: # Fetch random if needed
+            events_to_send = fetch_random_events(days_ahead=7, limit=n_events)
+            if "Update!" not in message_header: message_header += " Showing random events."
 
-            msg_text: str = ""
-            if events_to_send:
-                 # Calls updated format_events_message
-                 msg_text = format_events_message(
-                     events=events_to_send, time_period=time_period_str,
-                     postcode=postcode_for_msg, user_lat=lat, user_lon=lon,
-                     show_details=False
-                 )
+        msg_text: str = format_events_message(
+            events=events_to_send, time_period=time_period_str,
+            postcode=postcode_for_msg, user_lat=lat, user_lon=lon
+        )
 
-            if events_to_send and msg_text:
-                full_message: str = f"{message_header}\n\n{msg_text}"
-                if send_telegram_message(chat_id, full_message, reply_markup=None):
-                    sent_count += 1
-                else:
-                    logger.error(f"Failed sending broadcast message to chat_id {chat_id}.")
-                    failed_count += 1
-            elif not events_to_send:
-                 logger.info(f"No events found (local or random) for broadcast to chat_id {chat_id}.")
-                 failed_count += 1
+        if events_to_send and msg_text:
+            full_message: str = f"{message_header}\n\n{msg_text}"
+            if send_telegram_message(chat_id, full_message):
+                sent_count += 1
+            else: logger.error(f"Failed sending broadcast to chat_id {chat_id}.")
+        elif not events_to_send:
+             logger.info(f"No events found for broadcast to chat_id {chat_id}.")
 
-        except Exception as e:
-            logger.error(f"Error processing broadcast for subscriber {chat_id}: {e}", exc_info=True)
-            failed_count += 1
+        time.sleep(0.5)  # Rate limit
 
-        # Keep original rate limit delay
-        time.sleep(0.5)
-
-    logger.info(f"Broadcast finished. Sent to {sent_count}, Failed/No Events for {failed_count}/{len(subscribers)} subscribers.")
+    logger.info(f"Broadcast finished. Sent to {sent_count}/{len(subscribers)} subscribers.")
 
 
 # --- Main Application Loop ---
@@ -1312,7 +1329,7 @@ def main() -> None:
 
         # Trigger Broadcast
         try:
-            now_utc: datetime = datetime.utcnow()
+            now_utc: datetime.datetime = datetime.datetime.utcnow()
             current_hour_key: str = f"{now_utc.date()}-{now_utc.hour}"
             if now_utc.weekday() == 5 and now_utc.hour == 9 and current_hour_key != last_broadcast_hour_key:
                  logger.info(f"Triggering Saturday 9AM UTC broadcast for {current_hour_key}.")
