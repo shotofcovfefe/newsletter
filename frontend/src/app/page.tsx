@@ -2,28 +2,8 @@
 import { useState } from 'react'
 import SignupForm from '@/components/SignupForm'
 
-// ——— constants ———
-const interestTags = [
-  'Art', 'Food & Drink', 'Live Music', 'Workshops',
-  'Comedy', 'Markets', 'Families', 'Date Night', 'Solo Friendly'
-]
-const confettiColors = [
-  'bg-pink-500','bg-yellow-500','bg-green-500',
-  'bg-blue-500','bg-indigo-500','bg-purple-500','bg-red-500'
-]
 
 export default function Home() {
-  const [checked, setChecked]   = useState<Record<string, boolean>>({})
-  const [burst,   setBurst]     = useState<string | null>(null)
-
-  const handleTag = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const { value, checked } = e.target
-    setChecked(prev => ({ ...prev, [value]: checked }))
-    if (checked) {
-      setBurst(value)
-      setTimeout(() => setBurst(null), 600)
-    }
-  }
 
   return (
     <main className="bg-[#F5F2EE] text-black dark:bg-[#0A0A0A] dark:text-white

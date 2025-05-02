@@ -25,7 +25,7 @@ export default function AboutPage() {
         <div className="text-center space-y-4">
           <p className="text-xl text-neutral-700 leading-relaxed max-w-2xl mx-auto">
             Niche London Events is a no-scroll, no-noise newsletter. Tell us what you like — and where you live —
-            and we’ll do the curating. Every Friday, get five events handpicked for your tastes and area.
+            and we&lsquo;ll do the curating. Every Friday, get five events handpicked for your tastes and area.
           </p>
         </div>
 
@@ -56,11 +56,11 @@ export default function AboutPage() {
     {[
       {
         q: 'What kind of events do you feature?',
-        a: 'We cover a wide range — music, art, film, comedy, workshops, food, family, free happenings, and more. If it’s interesting and local, we’ll find it.',
+        a: 'We cover a wide range — music, art, film, comedy, workshops, food, family, free happenings, and more. If it&lsquo;s interesting and local, we&lsquo;ll find it.',
       },
       {
         q: 'How often will I receive the newsletter?',
-        a: 'Every Friday morning, so you’ve got time to plan your weekend.',
+        a: 'Every Friday morning, so you&lsquo;ve got time to plan your weekend.',
       },
       {
         q: 'How do you find the events?',
@@ -68,7 +68,7 @@ export default function AboutPage() {
       },
       {
         q: 'How does the personalization work?',
-        a: 'You give us your London postcode and select categories. We do the rest — matching you with nearby events you’re likely to love.',
+        a: 'You give us your London postcode and select categories. We do the rest — matching you with nearby events you&lsquo;re likely to love.',
       },
       {
         q: 'Is this service free?',
@@ -80,15 +80,15 @@ export default function AboutPage() {
       },
       {
         q: 'How do I unsubscribe?',
-        a: 'There’s an unsubscribe link at the bottom of every email.',
+        a: 'There&lsquo;s an unsubscribe link at the bottom of every email.',
       },
       {
         q: 'Who runs this?',
-        a: 'A tired Londoner who didn’t want to miss good stuff anymore.',
+        a: 'A tired Londoner who didn&lsquo;t want to miss good stuff anymore.',
       },
       {
         q: 'How can I submit an event?',
-        a: 'Send us an email. We only include events if they’re genuinely interesting.',
+        a: 'Send us an email. We only include events if they&lsquo;re genuinely interesting.',
       },
       {
         q: 'What parts of London do you cover?',
