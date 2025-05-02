@@ -53,7 +53,11 @@ export default function SignupForm() {
   /* tag toggle keeps styling identical */
   const toggleTag = (tag: typeof interestTags[number]) => {
     const current = new Set(watch('interests') ?? [])
-    current.has(tag) ? current.delete(tag) : current.add(tag)
+    if (current.has(tag)) {
+        current.delete(tag);
+    } else {
+        current.add(tag);
+    }
     setValue('interests', Array.from(current) as any)
     if (!current.has(tag)) {
       return
