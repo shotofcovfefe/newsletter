@@ -92,12 +92,14 @@ export default function SignupForm() {
       {/* honeypot - keeps bots at bay but invisible */}
       <input type="text" tabIndex={-1} className="hidden" {...register('website')} />
 
-      {/* Turnstile widget (invisible style keeps look identical) */}
+      {/* Turnstile widget */}
       <Turnstile
         siteKey={process.env.NEXT_PUBLIC_CF_SITE_KEY!}
         onSuccess={setToken}
         className="mb-4"
-        theme="dark"
+        options={{
+          theme: 'dark',
+        }}
       />
 
       {/*  ---- Email + Postcode ---- */}
