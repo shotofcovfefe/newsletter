@@ -37,17 +37,16 @@ export default function SignupForm() {
   const [burst, setBurst] = useState<string | null>(null)
 
   /* react-hook-form */
-  const { register, handleSubmit, watch, setValue, formState:{errors} } =
-      useForm<FormData>({
-        resolver: zodResolver(schema),
-        defaultValues: {
-          email: '',
-          postcode: '',
-          interests: [],
-          website: '',
-          cfToken: '',
-        },
-      })
+  const { register, handleSubmit, watch, setValue } = useForm<FormData>({
+  resolver: zodResolver(schema),
+  defaultValues: {
+    email: '',
+    postcode: '',
+    interests: [],
+    website: '',
+    cfToken: '',
+  },
+})
 
 
 
@@ -56,7 +55,7 @@ export default function SignupForm() {
     const current = new Set(watch('interests') ?? [])
     current.has(tag) ? current.delete(tag) : current.add(tag)
     setValue('interests', Array.from(current) as any)
-    if (!current.has(tag)) return
+    if (!current.has(tag)) return;
     setBurst(tag)
     setTimeout(()=>setBurst(null), 600)
   }
