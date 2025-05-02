@@ -61,7 +61,7 @@ async function verifyTurnstile(token:string, ip:string) {
 export async function POST(req: NextRequest) {
   /* rate-limit by IP */
   const ipHeader = req.headers.get('x-forwarded-for') ?? ''
-  const ip = (ipHeader.split(',')[0] || req.ip || 'unknown').trim()
+  const ip = ipHeader.split(',')[0]?.trim() || 'unknown'
 
   const { success } = await ratelimit.limit(ip)
   if (!success)
