@@ -92,7 +92,7 @@ export async function POST(req: NextRequest) {
     const confirmLink = `${process.env.NEXT_PUBLIC_URL}/confirm?email=${encodeURIComponent(email)}&token=${token}`
 
     const FROM_ADDR =
-      process.env.IS_DEV === true
+      process.env.IS_DEV === 'true'
         ? 'onboarding@resend.dev'
         : 'hello@unfog.london'
 
@@ -100,7 +100,7 @@ export async function POST(req: NextRequest) {
     /* send double-opt-in email via Resend */
     try {
   const { error: mailError } = await resend.emails.send({
-    from: 'unfog.london <hello@unfog.london>'
+    from: `unfog.london <${FROM_ADDR}>`,
     to:   email,
     subject: 'Confirm your subscription',
     html:  `Click <a href="${confirmLink}">here</a> to confirm.`,
