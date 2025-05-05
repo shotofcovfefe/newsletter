@@ -13,7 +13,7 @@ export default function Home() {
       <section className="flex flex-col items-center justify-center px-6 py-16 sm:py-24 text-center space-y-12">
         {/* Wide headline */}
         <h1 className="text-5xl sm:text-6xl font-serif font-semibold leading-tight tracking-tight max-w-5xl mx-auto">
-          Unfog London events, tailored to&nbsp;
+          Local London events, tailored to&nbsp;
           <span className="relative inline-block">
             <em className="italic font-normal">you</em>
             <span
@@ -26,7 +26,7 @@ export default function Home() {
 
         {/* Sub-headline */}
         <p className="text-lg sm:text-xl text-neutral-500 dark:text-neutral-400 leading-relaxed max-w-xl mx-auto">
-          The only newsletter for tailored, local events. No noise. No scrolling. Always free of charge.
+          The weekly events newsletter that learns your tasts. No noise. No scrolling. Always free of charge.
         </p>
 
         {/* Signup card */}
