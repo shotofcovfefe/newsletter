@@ -26,8 +26,7 @@ export default function Home() {
 
         {/* Sub-headline */}
         <p className="text-lg sm:text-xl text-neutral-500 dark:text-neutral-400 leading-relaxed max-w-xl mx-auto">
-          Curated events matched to your postcode and interests.
-          No noise. No scrolling. Just better weekends.
+          The only newsletter for tailored, local events. No noise. No scrolling. Always free of charge.
         </p>
 
         {/* Signup card */}
