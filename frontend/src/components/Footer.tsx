@@ -1,9 +1,30 @@
+// components/Footer.tsx
+import Link from 'next/link';
+
 export default function Footer() {
   return (
-    <footer className="w-full px-6 py-8 text-center text-sm text-neutral-500 border-t border-neutral-300">
-      &copy; {new Date().getFullYear()} Weekend Picks ·{' '}
-      <a href="#" className="underline hover:opacity-80">Privacy</a> ·{' '}
-      <a href="#" className="underline hover:opacity-80">Contact</a>
+    <footer className="w-full px-4 sm:px-6 py-6 text-center border-t border-neutral-200 dark:border-neutral-800 mt-16"> {/* Added dark border, adjusted padding/margin */}
+      <div className="space-y-2 max-w-prose mx-auto"> {/* Added max-width & centering for content */}
+
+        {/* Slogan - More prominent */}
+        <p className="text-sm text-neutral-700 dark:text-neutral-300">
+          Built with 🤍 in London. No tracking. No ads. Ever.
+        </p>
+
+        {/* Copyright & Links - More subtle */}
+        <p className="text-xs text-neutral-500 dark:text-neutral-400">
+          &copy; {new Date().getFullYear()} Unfog London {/* Updated Brand */}
+          <span className="mx-1.5">·</span> {/* Separator with slightly more space */}
+          <Link href="/privacy" className="underline hover:text-neutral-800 dark:hover:text-neutral-200 transition-colors duration-150">
+            Privacy
+          </Link>
+          <span className="mx-1.5">·</span>
+          <Link href="/contact" className="underline hover:text-neutral-800 dark:hover:text-neutral-200 transition-colors duration-150">
+            Contact
+          </Link>
+        </p>
+
+      </div>
     </footer>
-  )
+  );
 }
