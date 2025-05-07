@@ -8,7 +8,7 @@ export default function AboutPage() {
       {/* Hero image and headline */}
       <section className="relative w-full h-[300px] sm:h-[400px] overflow-hidden">
         <Image
-          src="/london-events-1.png"
+          src="/london-events-4.png"
           alt="People enjoying diverse events in London"
           fill
           className="object-cover"
@@ -28,8 +28,8 @@ export default function AboutPage() {
         {/* Intro Paragraph */}
         <div className="text-center">
           <p className="text-xl text-neutral-700 dark:text-neutral-300 leading-relaxed max-w-2xl mx-auto">
-            Unfog London is your no-scroll, no-noise newsletter for London events. Tell us what you like — and your postcode —
-            and we'll do the curating. Every Friday, get five events handpicked for your tastes and area.
+            Unfog.London is your no-scroll, no-noise newsletter for London events. Tell us what you like and where you like it,
+            and we'll do the curating. Every Friday, get upcoming events from high quality venues.
           </p>
         </div>
 
@@ -41,7 +41,7 @@ export default function AboutPage() {
               Tired of endless scrolling through generic listings to find events you actually care about in London? So were we.
             </p>
             <p>
-              Unfog London cuts through the noise. We deliver a curated list of interesting and relevant happenings
+              Unfog.London cuts through the noise. We deliver a curated list of interesting and relevant happenings
               across the city, tailored directly to your tastes and your local area.
             </p>
             <p>
@@ -96,7 +96,7 @@ export default function AboutPage() {
             },
             {
               q: 'Is this service free?',
-              a: 'Yes, Unfog London is completely free for subscribers.',
+              a: 'Yes, Unfog.London is completely free for subscribers.',
             },
             {
               q: 'Why do you need my postcode?',
@@ -112,7 +112,7 @@ export default function AboutPage() {
             },
             {
               q: 'Who runs this?',
-              a: 'Unfog London was founded and is run by me, Andy. I\'m a developer and East London local, and simply wanted a better way to discover local events.',
+              a: 'Unfog.London was founded and is run by me, Andy. I\'m a developer and East London local, and simply wanted a better way to discover local events.',
             },
             {
               q: 'How can I support?',
@@ -129,6 +129,10 @@ export default function AboutPage() {
             {
               q: 'Does it work equally well everywhere?',
               a: 'It works best in East London, but we are expanding!',
+            },
+            {
+              q: 'Do you share events through other means other than email?',
+              a: 'Yes! Check out our Telegram bot.',
             },
           ].map(({ q, a }, i) => (
             // --- ADDED pb-4 for spacing below each FAQ item's text ---

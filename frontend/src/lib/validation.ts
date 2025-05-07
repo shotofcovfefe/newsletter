@@ -54,7 +54,12 @@ export const subscriptionSchema = z.object({
   interests: z.array(z.enum(interestTags)).min(1, 'Pick at least one interest'),
   website:   z.string().max(0, { message: "Bots only" }).optional(), // Honeypot field
   cfToken:   z.string().min(1, { message: "Captcha completion required" }), // Cloudflare Turnstile token
+  newsletter: z.string().default('default'),
 });
 
 // --- Exported Type for Form Data ---
+/* raw values as they come from the form (newsletter still optional) */
+export type SubscriptionFormInput = z.input<typeof subscriptionSchema>;
+
+/* validated + defaults applied (newsletter now required) */
 export type SubscriptionFormData = z.infer<typeof subscriptionSchema>;

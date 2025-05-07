@@ -5,7 +5,7 @@ import { Ratelimit } from '@upstash/ratelimit';
 import { Resend } from 'resend';
 import crypto from 'node:crypto';
 
-import { generateConfirmationEmailContent } from '@/lib/emailTemplates';
+import { generateConfirmationEmailContent, templates } from '@/lib/emailTemplates';
 import { subscriptionSchema } from '@/lib/validation';
 
 /* --- Supabase Client --- */
@@ -100,7 +100,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true });
   }
 
-  const { email, postcode, interests, cfToken } = parsed.data;
+const { email, postcode, interests, cfToken, newsletter } = parsed.data;
 
   /* 5. Verify Cloudflare Turnstile Captcha */
   if (!(await verifyTurnstile(cfToken, ip))) {
@@ -134,8 +134,11 @@ export async function POST(req: NextRequest) {
 
   /* 7. Prepare and Send Confirmation Email */
   const confirmLink = `${process.env.NEXT_PUBLIC_URL}/confirm?email=${encodeURIComponent(email)}&token=${confirmToken}`;
-  const { html: emailHtml, text: emailText } = generateConfirmationEmailContent(confirmLink);
-  const emailSubject = 'Confirm your Unfog London subscription';
+  const { html: emailHtml, text: emailText } =
+    generateConfirmationEmailContent(confirmLink, newsletter as keyof typeof templates);
+  const emailSubject =
+    templates[newsletter as keyof typeof templates]?.subject
+    ?? templates.default.subject;
   const FROM_ADDR = process.env.IS_DEV === 'true' ? 'onboarding@resend.dev' : 'hello@unfog.london';
 
   try {
