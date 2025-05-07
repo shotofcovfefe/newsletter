@@ -3,8 +3,8 @@ import Link from 'next/link';
 
 export default function Footer() {
   return (
-    <footer className="w-full px-4 sm:px-6 py-6 text-center border-t border-neutral-200 dark:border-neutral-800 mt-16"> {/* Added dark border, adjusted padding/margin */}
-      <div className="space-y-2 max-w-prose mx-auto"> {/* Added max-width & centering for content */}
+    <footer className="w-full px-4 sm:px-6 py-6 text-center border-t border-neutral-200 dark:border-neutral-800">
+      <div className="space-y-2 max-w-prose mx-auto">
 
         {/* Slogan - More prominent */}
         <p className="text-sm text-neutral-700 dark:text-neutral-300">

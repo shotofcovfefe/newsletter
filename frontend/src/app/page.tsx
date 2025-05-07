@@ -26,7 +26,7 @@ export default function Home() {
 
         {/* Sub-headline */}
         <p className="text-lg sm:text-xl text-neutral-500 dark:text-neutral-400 leading-relaxed max-w-xl mx-auto">
-          The weekly events newsletter that learns your tasts. No noise. No scrolling. Always free of charge.
+          The weekly events newsletter that learns your taste. No noise. No stress. Forever free.
         </p>
 
         {/* Signup card */}

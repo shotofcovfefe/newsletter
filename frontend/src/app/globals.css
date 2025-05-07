@@ -36,6 +36,7 @@ body {
   filter: blur(1px) grayscale(0.2) saturate(1.2) sepia(0.2);
   pointer-events: none;
   z-index: 40;
+  overflow-x: hidden;
 }
 #foglayer_01, #foglayer_02, #foglayer_03 {
   height: 100%;
