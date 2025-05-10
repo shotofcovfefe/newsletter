@@ -132,7 +132,11 @@ export default function AboutPage() {
             },
             {
               q: 'Do you share events through other means other than email?',
-              a: 'Yes! Check out our Telegram bot.',
+              a: 'Yes! Check out our <a href="https://t.me/london_events_bot">Telegram bot</a>.',
+            },
+            {
+              q: 'Where can I see all available newsletters?',
+              a: 'You can browse all our themed and location-specific newsletters on the <a href="/newsletters" class="text-emerald-600 dark:text-emerald-400 hover:underline font-medium">Newsletters Directory</a>.',
             },
           ].map(({ q, a }, i) => (
             // --- ADDED pb-4 for spacing below each FAQ item's text ---

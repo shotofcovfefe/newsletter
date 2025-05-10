@@ -75,8 +75,8 @@
     "name": "Hampton Court Palace Food Festival NL",
     "descriptions": "Updates on the annual food festival and related events at Hampton Court Palace",
     "url": "https://www.hrp.org.uk/hampton-court-palace/",
-    "email": "",
-    "newsletter_type": "food events",
+    "email": "latest@email.hrp.org.uk",
+    "newsletter_type": "museums",
     "has_newsletter": true,
     "signed_up": false
   },
@@ -86,15 +86,6 @@
     "url": "https://www.cheapskatelondon.com/",
     "email": "hello@cheapskatelondon.com",
     "newsletter_type": "free events",
-    "has_newsletter": true,
-    "signed_up": false
-  },
-  {
-    "name": "Absolutely London",
-    "descriptions": "Delivers tips on the latest happenings, events, and lifestyle in London",
-    "url": "https://absolutely.london/",
-    "email": "",
-    "newsletter_type": "lifestyle, events",
     "has_newsletter": true,
     "signed_up": false
   },
@@ -111,7 +102,7 @@
     "name": "The London Scoop",
     "descriptions": "Weekly guide to family-friendly events, fun activities, and exciting attractions across London for families",
     "url": "https://www.thelondonscoop.com/subscribe",
-    "email": "",
+    "email": "thelondonscoop@mail.beehiiv.com",
     "newsletter_type": "family events",
     "has_newsletter": true,
     "signed_up": false
@@ -120,7 +111,7 @@
     "name": "Secret London Newsletter",
     "descriptions": "Weekly roundup of new bars, restaurants, pop-ups, events, and art exhibitions",
     "url": "https://secretldn.com/secret-london-newsletter/",
-    "email": "",
+    "email": "hello@secretldn.com",
     "newsletter_type": "general events, food, art",
     "has_newsletter": true,
     "signed_up": false
@@ -129,7 +120,7 @@
     "name": "The London Weekend",
     "descriptions": "Highlights weekend events and activities across London for planning",
     "url": "https://www.thelondonweekend.com/",
-    "email": "",
+    "email": "jimmy@thelondonweekend.com",
     "newsletter_type": "weekend events",
     "has_newsletter": true,
     "signed_up": false
@@ -138,7 +129,7 @@
     "name": "The Nudge",
     "descriptions": "Weekly recommendations for restaurants, bars, events, and cultural activities",
     "url": "https://thenudge.com/email-signup/",
-    "email": "",
+    "email": "Hello@thenudge.com",
     "newsletter_type": "food, events",
     "has_newsletter": true,
     "signed_up": false
@@ -147,20 +138,20 @@
     "name": "Roman Road London",
     "url": "https://romanroadlondon.com/subscribe/",
     "address": null,
-    "postcode":  null,
-    "venue_type":  "newsletter",
-    "is_generic":  true,
-    "has_newsletter":  true,
-    "signed_up":  true
+    "postcode": null,
+    "venue_type": "newsletter",
+    "is_generic": true,
+    "has_newsletter": true,
+    "signed_up": true
   },
   {
     "name": "Jaguar Shoes Collective",
     "url": "https://www.jaguarshoes.com/venues/the-victoria/",
     "address": "451 Queensbridge Road\nDalston\nLondon\nE8 3AS",
-    "postcode":  "E8 3AS",
-    "venue_type":  "pub",
-    "is_generic":  true,
-    "has_newsletter":  true,
-    "signed_up":  false
+    "postcode": "E8 3AS",
+    "venue_type": "pub",
+    "is_generic": true,
+    "has_newsletter": true,
+    "signed_up": false
   }
 ]

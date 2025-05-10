@@ -1,4 +1,3 @@
-// components/Footer.tsx
 import Link from 'next/link';
 
 export default function Footer() {
@@ -13,8 +12,8 @@ export default function Footer() {
 
         {/* Copyright & Links - More subtle */}
         <p className="text-xs text-neutral-500 dark:text-neutral-400">
-          &copy; {new Date().getFullYear()} Unfog London {/* Updated Brand */}
-          <span className="mx-1.5">·</span> {/* Separator with slightly more space */}
+          &copy; {new Date().getFullYear()} Unfog London
+          <span className="mx-1.5">·</span>
           <Link href="/privacy" className="underline hover:text-neutral-800 dark:hover:text-neutral-200 transition-colors duration-150">
             Privacy
           </Link>
@@ -22,8 +21,11 @@ export default function Footer() {
           <Link href="/contact" className="underline hover:text-neutral-800 dark:hover:text-neutral-200 transition-colors duration-150">
             Contact
           </Link>
+          <span className="mx-1.5">·</span>
+          <Link href="/newsletters" className="underline hover:text-neutral-800 dark:hover:text-neutral-200 transition-colors duration-150">
+            Newsletters
+          </Link>
         </p>
-
       </div>
     </footer>
   );
