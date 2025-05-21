@@ -27,6 +27,7 @@ supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 def _date_to_iso(d: date | None) -> str | None:
     return d.isoformat() if d else None
 
+
 def _time_to_str(t: time | None) -> str | None:
     return t.isoformat(timespec="seconds") if t else None
 
@@ -91,9 +92,9 @@ def save_events_to_db(events: list[Event], email_message_id: str) -> None:
 
         # --- SERIALISE new date/time columns -----------------------
         rec["start_date"] = _date_to_iso(rec["start_date"])
-        rec["end_date"]   = _date_to_iso(rec["end_date"])
+        rec["end_date"] = _date_to_iso(rec["end_date"])
         rec["start_time"] = _time_to_str(rec["start_time"])
-        rec["end_time"]   = _time_to_str(rec["end_time"])
+        rec["end_time"] = _time_to_str(rec["end_time"])
 
         rec["email_message_id"] = email_message_id
         rows.append(rec)
@@ -158,20 +159,21 @@ def email_already_processed(message_id: str) -> bool:
     )
     return bool(res.data)
 
+
 def mark_email_processed(message_id: str, parsed_ok: bool, note: str | None = None) -> None:
     """
     Upsert {message_id, processed_at, parsed_ok, note}.
     """
     row = {
-        "message_id":  message_id,
+        "message_id": message_id,
         "processed_at": datetime.utcnow().isoformat(),
-        "parsed_ok":   parsed_ok,
-        "note":        note,
+        "parsed_ok": parsed_ok,
+        "note": note,
     }
     supabase.table("emails_processed").upsert(row).execute()
 
 
-def fetch_unprocessed_emails(batch_size: int = 10000) -> list[dict]:
+def fetch_unprocessed_emails(batch_size: int) -> list[dict]:
     """
     Return up to `batch_size` emails that have **no** row in emails_processed.
     """

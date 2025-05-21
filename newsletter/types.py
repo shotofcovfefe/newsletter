@@ -9,15 +9,17 @@ from dateutil.relativedelta import relativedelta
 from dateutil.rrule import rrulestr
 from pydantic import BaseModel, Field, constr, field_validator, model_validator
 
+
 # ───────────── ENUMS ──────────────────────────────────────────────
 class TimeOfDay(str, Enum):
-    early_morning = "early_morning"   # 05:00–08:59
-    late_morning  = "late_morning"    # 09:00–11:59
-    morning       = "morning"         # 05:00–11:59
-    afternoon     = "afternoon"       # 12:00–16:59
-    evening       = "evening"         # 17:00–20:59
-    night         = "night"           # 21:00–04:59
-    tbc           = "tbc"
+    early_morning = "early_morning"  # 05:00–08:59
+    late_morning = "late_morning"  # 09:00–11:59
+    morning = "morning"  # 05:00–11:59
+    afternoon = "afternoon"  # 12:00–16:59
+    evening = "evening"  # 17:00–20:59
+    night = "night"  # 21:00–04:59
+    all_day = "all_day"
+    tbc = "tbc"
 
 
 class EventOccurrenceType(str, Enum):
@@ -37,6 +39,7 @@ class EventType(str, Enum):
     talks_and_lectures = "talks_and_lectures"
     workshops_and_classes = "workshops_and_classes"
     festivals = "festivals"
+    lgbtq = "lgbtq"
     food_and_drink = "food_and_drink"
     sports_and_fitness = "sports_and_fitness"
     social_and_networking = "social_and_networking"
@@ -67,93 +70,87 @@ class EventBookingType(str, Enum):
 
 class EventTargetAudience(str, Enum):
     # ── broad & default ─────────────────────────────────────────
-    all                    = "all"
-    adults                 = "adults"
-    families               = "families"
-    kids                   = "kids"
-    teens                  = "teens"
-    students               = "students"
-    young_professionals    = "young_professionals"
-    seniors                = "seniors"
+    all = "all"
+    adults = "adults"
+    families = "families"
+    kids = "kids"
+    teens = "teens"
+    students = "students"
+    young_professionals = "young_professionals"
+    seniors = "seniors"
 
     # ── skill / experience level ───────────────────────────────
-    beginners              = "beginners"
-    intermediate           = "intermediate"
-    experts                = "experts"
+    beginners = "beginners"
+    intermediate = "intermediate"
+    experts = "experts"
 
     # ── relationship / social mode ─────────────────────────────
-    couples                = "couples"
-    date_night             = "date_night"
-    singles                = "singles"
-    friends                = "friends"
-    solo_attendees         = "solo_attendees"
-    new_in_town            = "new_in_town"
-    remote_workers         = "remote_workers"
+    couples = "couples"
+    date_night = "date_night"
+    singles = "singles"
+    friends = "friends"
+    solo_attendees = "solo_attendees"
+    new_in_town = "new_in_town"
+    remote_workers = "remote_workers"
 
     # ── identity / inclusion ──────────────────────────────────
-    lgbtq_plus             = "lgbtq+"
-    women                  = "women"
-    men                    = "men"
-    neurodivergent         = "neurodivergent"
-    disabled_access        = "disabled_access"
-    faith_communities      = "faith_communities"
-    newcomer_refugees      = "newcomer_refugees"
+    lgbtq_plus = "lgbtq+"
 
     # ── interest: arts & culture ───────────────────────────────
-    art_lovers             = "art_lovers"
-    bookworms              = "bookworms"
-    film_buffs             = "film_buffs"
-    theatre_lovers         = "theatre_lovers"
-    music_lovers           = "music_lovers"
-    makers_crafters        = "makers_crafters"
-    photographers          = "photographers"
-    gamers                 = "gamers"
-    fashion_enthusiasts    = "fashionistas"
-    history_buffs          = "history_buffs"
-    comedy_fans            = "comedy_fans"
+    art_lovers = "art_lovers"
+    bookworms = "bookworms"
+    film_buffs = "film_buffs"
+    theatre_lovers = "theatre_lovers"
+    music_lovers = "music_lovers"
+    makers_crafters = "makers_crafters"
+    photographers = "photographers"
+    gamers = "gamers"
+    fashion_enthusiasts = "fashionistas"
+    history_buffs = "history_buffs"
+    comedy_fans = "comedy_fans"
 
     # ── interest: food & drink ─────────────────────────────────
-    foodies                = "foodies"
-    coffee_aficionados     = "coffee_aficionados"
-    beer_enthusiasts       = "beer_enthusiasts"
-    wine_lovers            = "wine_lovers"
-    vegans                 = "vegans"
+    foodies = "foodies"
+    coffee_aficionados = "coffee_aficionados"
+    beer_enthusiasts = "beer_enthusiasts"
+    wine_lovers = "wine_lovers"
+    vegans = "vegans"
 
     # ── interest: sport & outdoors ─────────────────────────────
-    sports_fans            = "sports_fans"
-    runners                = "runners"
-    cyclists               = "cyclists"
-    hikers                 = "hikers"
-    gardeners              = "gardeners"
+    sports_fans = "sports_fans"
+    runners = "runners"
+    cyclists = "cyclists"
+    hikers = "hikers"
+    gardeners = "gardeners"
 
     # ── interest: wellness & spirituality ──────────────────────
-    yogis                  = "yogis"
-    wellness_seekers       = "wellness_seekers"
-    spirituality_seekers   = "spirituality_seekers"
-    religious              = "religious"
+    yogis = "yogis"
+    wellness_seekers = "wellness_seekers"
+    spirituality_seekers = "spirituality_seekers"
+    religious = "religious"
 
     # ── professional / learning ────────────────────────────────
-    entrepreneurs          = "entrepreneurs"
-    tech_enthusiasts       = "tech_enthusiasts"
-    creatives              = "creatives"
-    language_learners      = "language_learners"
+    entrepreneurs = "entrepreneurs"
+    tech_enthusiasts = "tech_enthusiasts"
+    creatives = "creatives"
+    language_learners = "language_learners"
 
     # ── cause / lifestyle values ───────────────────────────────
-    eco_conscious          = "eco_conscious"
-    environmentalists      = "environmentalists"
-    charity_volunteers     = "charity_volunteers"
-    alternative_culture    = "alternative_culture"
-    nightlife_crowd        = "nightlife_crowd"
-    local_community        = "local_community"
-    pet_owners             = "pet_owners"
-    activism_and_causes    = "activism_and_causes"
+    eco_conscious = "eco_conscious"
+    environmentalists = "environmentalists"
+    charity_volunteers = "charity_volunteers"
+    alternative_culture = "alternative_culture"
+    nightlife_crowd = "nightlife_crowd"
+    local_community = "local_community"
+    pet_owners = "pet_owners"
+    activism_and_causes = "activism_and_causes"
 
     # ── family-stage specifics ─────────────────────────────────
-    parents_with_babies    = "parents_with_babies"
-    pre_schoolers          = "pre_schoolers"
+    parents_with_babies = "parents_with_babies"
+    pre_schoolers = "pre_schoolers"
 
     # ── fallback ───────────────────────────────────────────────
-    tbc                    = "tbc"
+    tbc = "tbc"
 
 
 _RRULE_RE = re.compile(
@@ -168,6 +165,7 @@ _RRULE_RE = re.compile(
     r"$"
 )
 
+
 # ───────────── EVENT MODEL ────────────────────────────────────────
 class Event(BaseModel):
     # identifiers
@@ -180,10 +178,10 @@ class Event(BaseModel):
 
     # when
     start_date: date
-    end_date:   date | None = None          # only for continuous spans
+    end_date: date | None = None  # only for continuous spans
     start_time: time | None = None
-    end_time:   time | None = None
-    is_all_day: bool = False                # true for 24-hour spans
+    end_time: time | None = None
+    is_all_day: bool = False  # true for 24-hour spans
     time_of_day: TimeOfDay = TimeOfDay.tbc
     timezone: str = "Europe/London"
 
@@ -195,6 +193,7 @@ class Event(BaseModel):
     location_type: EventLocationType = EventLocationType.tbc
     location_address_verbatim: str | None = None
     location_neighbourhood: str | None = None
+    location_borough: str | None = None
     online_url: str | None = None
 
     # cost & booking
@@ -219,39 +218,42 @@ class Event(BaseModel):
     organizer_name: str | None = None
     is_organizer_sender: bool | None = None
 
+    from_aggregator: bool = None
+
     # QA
     parsing_confidence_score: float = Field(0.0, ge=0.0, le=1.0)
-
-    # ─── Validators ────────────────────────────────────────────────
-    # @field_validator("recurrence_rule")
-    # def _valid_rrule(cls, v: str | None) -> str | None:
-    #     if v:
-    #         v = v.removeprefix("RRULE:")  # normalise prefix
-    #         if not _RRULE_RE.fullmatch(v):
-    #             raise ValueError("recurrence_rule must be valid RFC-5545")
-    #     return v
 
     @field_validator("recurrence_rule")
     def validate_and_patch_rrule(cls, v, info):
         if v is None:
             return None
-        v = v.removeprefix("RRULE:")
+
+        # 1. Make sure the string starts with "RRULE:"
+        if not v.startswith("RRULE:"):
+            v = f"RRULE:{v}"
+
+        # 2. Convert any extended ISO UNTIL value to iCalendar “basic” form
+        v = re.sub(
+            r"UNTIL=([\d]{4}-[\d]{2}-[\d]{2}T[\d]{2}:[\d]{2}:[\d]{2}Z?)",
+            lambda m: "UNTIL=" +  # keep the key
+                      datetime.fromisoformat(  # parse 2025-06-19T19:00:00[Z]
+                          m.group(1).rstrip("Z")
+                      ).strftime("%Y%m%dT%H%M%S") +
+                      ("Z" if m.group(1).endswith("Z") else ""),
+            v,
+        )
+
+        # now the string is definitely parsable
         rule = rrulestr(v)
 
-        # Check if it's infinite (missing both COUNT and UNTIL)
+        # --- your existing “infinite rule” patch -------------------
         if rule._count is None and rule._until is None:
-            # Try to patch it safely
             start_date = info.data.get("start_date")
             if start_date is None:
                 raise ValueError("Cannot patch infinite recurrence_rule because start_date is missing.")
-
-            # Set UNTIL = start_date + 1 year
             until = start_date + timedelta(days=365)
-            # Patch the rule string
-            v = v + f";UNTIL={until.strftime('%Y%m%d')}"
-
-            # Validate again
-            rrulestr(v)
+            v = f"{v};UNTIL={until.strftime('%Y%m%d')}"
+            rrulestr(v)  # re-validate
 
         return v
 

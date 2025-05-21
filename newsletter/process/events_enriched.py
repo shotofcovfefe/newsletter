@@ -9,14 +9,16 @@ from datetime import datetime, date, timedelta, timezone
 from typing import Any, List
 
 from dotenv import load_dotenv
-from openai  import OpenAI
+from openai import OpenAI
 from supabase import create_client, Client
 from dateutil import parser as dtparser
 from dateutil.rrule import rrulestr, WEEKLY
 
+from newsletter.constants import SKIP_EMAIL_ADDRESSES
 from newsletter.types import (
     EventType, EventTargetAudience,
 )
+from newsletter.utils import get_postcode_info, is_valid_london_postcode
 
 # ───────────── env / logging / clients ────────────────────────── #
 load_dotenv()
@@ -33,13 +35,13 @@ SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 if not all([SUPABASE_URL, SUPABASE_KEY, OPENAI_API_KEY]):
-     raise ValueError("Supabase URL/Key or OpenAI API Key not configured in environment.")
+    raise ValueError("Supabase URL/Key or OpenAI API Key not configured in environment.")
 
 sb: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 ai = OpenAI(api_key=OPENAI_API_KEY)
 
 # allowed enums --------------------------------------------------- #
-ALLOWED_AUDIENCES  = {e.value for e in EventTargetAudience}
+ALLOWED_AUDIENCES = {e.value for e in EventTargetAudience}
 ALLOWED_TYPES = {e.value for e in EventType}
 
 
@@ -50,6 +52,7 @@ def _get_ordinal_suffix(day: int) -> str:
     if 11 <= day <= 13:
         return "th"
     return {1: "st", 2: "nd", 3: "rd"}.get(day % 10, "th")
+
 
 def render_event_date_string(ev: dict[str, Any]) -> str:
     """
@@ -108,13 +111,13 @@ def render_event_date_string(ev: dict[str, Any]) -> str:
         time_obj = dtparser.parse(start_time_str).time()
         time_part = time_obj.strftime("%H:%M")
     elif time_of_day := ev.get("time_of_day"):
-         if time_of_day != "tbc":
-             time_part = time_of_day.replace('_', ' ').title()
+        if time_of_day != "tbc":
+            time_part = time_of_day.replace('_', ' ').title()
 
     return f"{date_part} · {time_part}" if time_part else date_part
 
 
-def cost_line(ev: dict[str,Any]) -> str:
+def cost_line(ev: dict[str, Any]) -> str:
     if ev.get("is_donation_based"):
         return "Pay-what-you-can"
 
@@ -123,7 +126,7 @@ def cost_line(ev: dict[str,Any]) -> str:
 
     if cost_amount is None:
         if "free" in cost_desc or "no cost" in cost_desc:
-             return "Free"
+            return "Free"
         return None
 
     # Attempt conversion, let errors propagate if format is wrong
@@ -132,17 +135,17 @@ def cost_line(ev: dict[str,Any]) -> str:
 
     if cost_desc:
         # Avoid redundancy
-        desc_verbatim = ev.get('cost_description_verbatim', '') # Get original casing
+        desc_verbatim = ev.get('cost_description_verbatim', '')  # Get original casing
         if str(cost_amount) in desc_verbatim or money in desc_verbatim:
-             return money
+            return money
         # Check again for free just in case description says free but amount is present
         if "free" in cost_desc:
-             return "Free"
+            return "Free"
         return f"{money} · {desc_verbatim}"
     return money
 
 
-def _clean_list(raw: list[str]|str|None, allowed:set[str]) -> list[str]:
+def _clean_list(raw: list[str] | str | None, allowed: set[str]) -> list[str]:
     """Cleans list input, expects list or specific string format '{a,b}'."""
     if not raw:
         return ["tbc"]
@@ -177,13 +180,12 @@ def _emoji_for_type(t: str) -> str:
         "theatre_and_performing_arts": "🎭", "literature_and_talks": "🎤",
         "markets_and_fairs": "🛍️", "community_and_causes": "🤝",
         "family_and_kids": "👨‍👩‍👧‍👦", "festivals": "🎉", "tours_and_walks": "🚶",
-        "wellbeing_and_spirituality": "🧘", "gaming_and_technology":"🎮",
-        "networking_and_business":"📈", "other": "🎫" # Default/Other
-    }.get(t, "🎫") # Fallback emoji
+        "wellbeing_and_spirituality": "🧘", "gaming_and_technology": "🎮",
+        "networking_and_business": "📈", "other": "🎫"  # Default/Other
+    }.get(t, "🎫")  # Fallback emoji
 
 
-
-def gpt_pretty(ev: dict[str,Any], venue_name: str) -> dict[str,str]|None:
+def gpt_pretty(ev: dict[str, Any], venue_name: str) -> dict[str, str] | None:
     """Calls OpenAI GPT. Handles API errors and JSON parsing errors."""
     sys = (
         "You output STRICT JSON with keys:\n"
@@ -202,18 +204,18 @@ def gpt_pretty(ev: dict[str,Any], venue_name: str) -> dict[str,str]|None:
     )
     r = ai.chat.completions.create(
         model="gpt-4o",
-        messages=[{"role":"system","content":sys},{"role":"user","content":user}],
+        messages=[{"role": "system", "content": sys}, {"role": "user", "content": user}],
         temperature=0.4,
-        response_format={"type":"json_object"},
+        response_format={"type": "json_object"},
     )
     content = r.choices[0].message.content
     return json.loads(content)
 
 
-def extract_domain(email:str|None)->str|None:
+def extract_domain(email: str | None) -> str | None:
     if not email or "@" not in email:
         return None
-    return email.split("@",1)[1].lower()
+    return email.split("@", 1)[1].lower()
 
 
 # ───────────── main enrichment loop ────────────────────────────── #
@@ -226,20 +228,16 @@ def enrich_batch(batch: int = 500) -> None:
 
     # --- Get already processed/enriched event IDs (Keep try/except) ---
     done: set[str] = set()
-    try:
-        r_ok = sb.table("events_enriched").select("event_id").execute()
-        done.update(row["event_id"] for row in (r_ok.data or []))
-        r_proc = sb.table("events_enriched_processed").select("event_id").execute()
-        done.update(row["event_id"] for row in (r_proc.data or []) if row["event_id"])
-        logger.info(f"Found {len(done)} total unique processed/enriched events to skip.")
-    except Exception as e:
-        logger.error(f"CRITICAL: Failed to query existing enriched/processed events: {e}. Aborting.")
-        return
+    r_ok = sb.table("events_enriched").select("event_id").execute()
+    done.update(row["event_id"] for row in (r_ok.data or []))
+    r_proc = sb.table("events_enriched_processed").select("event_id").execute()
+    done.update(row["event_id"] for row in (r_proc.data or []) if row["event_id"])
+    logger.info(f"Found {len(done)} total unique previously enriched events.")
 
     # --- Fetch batch of new events (Keep try/except) ---
     events_to_process = []
     try:
-        today=date.today().isoformat()
+        today = date.today().isoformat()
         query = sb.table("events").select("*")
         if done:
             query = query.not_.in_("id", list(done))
@@ -254,36 +252,42 @@ def enrich_batch(batch: int = 500) -> None:
         events_to_process = query.data or []
         logger.info("Fetched %d new events to enrich", len(events_to_process))
     except Exception as e:
-         logger.error(f"CRITICAL: Failed to fetch batch of events: {e}. Aborting.", exc_info=True)
-         return
+        logger.error(f"CRITICAL: Failed to fetch batch of events: {e}. Aborting.", exc_info=True)
+        return
 
     # --- Columns to select for venue ---
-    VENUE_COLUMNS = "id, name, latitude, longitude, url, postcode"
+    VENUE_COLUMNS = "id, name, latitude, longitude, url, postcode, neighbourhood, borough"
 
     # --- Process Events (Keep outer try/except for loop continuation) ---
     for e in events_to_process:
-        eid=e["id"]
+        eid = e["id"]
         processed_count += 1
         logger.debug(f"Processing event: {eid} - {e.get('title', 'No Title')}")
 
-        try: # Keep this loop-level try/except for general processing errors
+        try:
 
             # --- Fetch associated email data ---
             email_data = {}
             if msg_id := e.get("email_message_id"):
                 try:
-                    email_resp = sb.table("emails").select("email_address, sender_name").eq("message_id", msg_id).maybe_single().execute()
+                    email_resp = sb.table("emails").select("email_address, sender_name").eq("message_id",
+                                                                                            msg_id).maybe_single().execute()
                     email_data = email_resp.data or {}
                 except Exception as email_err:
                     logger.error(f"DBError fetching email data for message_id {msg_id} (event {eid}): {email_err}")
-                    # Decide if this is critical - let's continue for now
             else:
                 logger.warning(f"Event {eid} has no email_message_id.")
 
-            venue = None
+            if e['from_aggregator']:
+                print("ATTEMPTING ENRICHMENT WITH FROM AGGREGATE EVENT!!")
+
+            venue = {}
             email_address = email_data.get("email_address")
             domain = extract_domain(email_address)
             sender_name = email_data.get("sender_name")
+
+            if email_address in SKIP_EMAIL_ADDRESSES:
+                continue
 
             # (a) match on exact email address
             if email_address:
@@ -298,29 +302,33 @@ def enrich_batch(batch: int = 500) -> None:
                     venue = venue_response.data
                     logger.info(f"Venue matched by email: {email_address} -> {venue['name']}")
 
-
             # (b) match on domain (if no email match)
             if not venue and domain:
-                venue_response = (
-                    sb.table("venues")
-                    .select(VENUE_COLUMNS)
-                    .eq("domain", domain)
-                    .limit(1)
-                    .execute()
+                # Skip generic domains that might be used by different venues
+                generic_domain_keywords = ["substack", "beehiiv", "buttondown", "mailchimp", "convertkit"]
+                if not any(keyword in domain.lower() for keyword in generic_domain_keywords):
+                    venue_response = (
+                        sb.table("venues")
+                        .select(VENUE_COLUMNS)
+                        .eq("domain", domain)
+                        .limit(1)
+                        .execute()
                     )
-                if venue_response and venue_response.data:
-                    venue = venue_response.data[0]
-                    logger.info(f"Venue matched by domain: {domain} -> {venue['name']}")
+                    if venue_response and venue_response.data:
+                        venue = venue_response.data[0]
+                        logger.info(f"Venue matched by domain: from email {email_address} -> {venue['name']}")
+                else:
+                    logger.info(f"Skipped matching on generic domain: {domain}")
 
             # (c) fallback to sender_name (if still no match)
             if not venue and sender_name:
                 sender_name_lower = sender_name.strip().lower()
-                generic_names = {"info", "hello", "admin", "events", "bookings"} # Keep this check
+                generic_names = {"info", "hello", "admin", "events", "bookings"}
                 if sender_name_lower not in generic_names:
                     venue_response = (
                         sb.table("venues")
                         .select(VENUE_COLUMNS)
-                        .ilike("name", f"%{sender_name_lower}%") # Fuzzy match
+                        .ilike("name", f"%{sender_name_lower}%")
                         .limit(1)
                         .execute()
                     )
@@ -329,9 +337,11 @@ def enrich_batch(batch: int = 500) -> None:
                         logger.info(f"Venue matched by fuzzy sender name: '{sender_name}' -> {venue['name']}")
 
             # --- Check if venue was found ---
-            if not venue:
-                logger.warning(f"Venue not found for event {eid}. Skipping.")
-                _mark_processed(eid,"venue_not_found")
+            if not e['from_aggregator'] and not venue:
+                logger.warning(f"Venue not found for non-aggregate sourced event {eid}@{email_address}. Skipping.")
+                import sys
+                sys.exit(0)
+                _mark_processed(eid, "venue_not_found")
                 skipped_venue += 1
                 continue
 
@@ -340,51 +350,69 @@ def enrich_batch(batch: int = 500) -> None:
             target_audiences_raw = e.get("target_audiences")
             vibes_tags_raw = e.get("vibes_tags")
 
-            # --- Generate Card Fields (Errors will raise) ---
+            # --- Generate Card Fields ---
             date_line = render_event_date_string(e)
             cost = cost_line(e)
 
             # --- Call GPT (Errors handled inside function) ---
-            pretty = gpt_pretty(e, venue["name"])
+            pretty = gpt_pretty(e, venue.get("name"))
+
+            # --- retrieve location information ---
+            borough = venue['borough']
+            neighbourhood = venue['neighbourhood']
+            if (not borough or not neighbourhood) and is_valid_london_postcode(e['location_postcode']):
+                postcode_info = get_postcode_info(e['location_postcode'])
+                if not borough:
+                    borough = postcode_info.get('borough')
+                if not neighbourhood:
+                    neighbourhood = postcode_info.get('neighbourhood')
 
             # --- Prepare Insert Payload (Errors will raise) ---
             insert_payload = {
-                "event_id"       : eid,
-                "venue_id"       : venue["id"],
-                "latitude"       : venue["latitude"],
-                "longitude"      : venue["longitude"],
-                "postcode"       : venue["postcode"],
-                "card_title"     : pretty["pretty_title"],
-                "venue_name"     : venue['name'],
-                "card_date_line" : date_line,
-                "card_vibes"     : vibes_tags_raw,
-                "card_blurb"     : pretty["blurb"],
-                "event_types"    : e["event_types"],
+                "event_id": eid,
+                "venue_id": venue["id"],
+                "latitude": venue["latitude"],
+                "longitude": venue["longitude"],
+                "postcode": venue["postcode"],
+                "card_title": pretty["pretty_title"],
+                "venue_name": venue['name'],
+                "card_date_line": date_line,
+                "card_vibes_arr": vibes_tags_raw,
+                "card_blurb": pretty["blurb"],
+                "event_types": e["event_types"],
                 "audience_badges": e["target_audiences"],
-                "type_badge"     : pretty["event_type"],
-                "cost_line"      : cost,
+                "type_badge": pretty["event_type"],
+                "cost_line": cost,
                 "preview_image_url": e.get("image_url"),
                 "start_date": e.get("start_date"),
                 "end_date": e.get("end_date"),
                 "start_time": e.get("start_time"),
                 "end_time": e.get("end_time"),
                 "recurrence_rule": e["recurrence_rule"],
-                "venue_url"      : venue["url"],
+                "venue_url": venue["url"],
+                "location_neighbourhood": neighbourhood,
+                "location_borough": borough,
+                "from_aggregator": e['from_aggregator']
             }
+
+            if e['from_aggregator']:
+                print(insert_payload)
+                import sys
+                sys.exit(0)
 
             # --- Insert into enriched table (Keep try/except) ---
             try:
                 insert_resp = sb.table("events_enriched").insert(insert_payload).execute()
                 if hasattr(insert_resp, 'data') and insert_resp.data:
-                     logger.info(f"Success: Enriched event {eid} - {pretty['pretty_title']}")
-                     _mark_processed(eid,"Success") # Mark success
-                     success_count += 1
+                    logger.info(f"Success: Enriched event {eid} - {pretty['pretty_title']}")
+                    _mark_processed(eid, "Success")  # Mark success
+                    success_count += 1
                 else:
-                     error_message = f"Insert failed (no data returned or potential error). Status: {getattr(insert_resp, 'status_code', 'N/A')}"
-                     if hasattr(insert_resp, 'error') and insert_resp.error:
-                         error_message = f"Insert failed: {insert_resp.error.message}"
-                     logger.error(f"Failed to insert enriched data for event {eid}: {error_message}")
-                     error_count += 1
+                    error_message = f"Insert failed (no data returned or potential error). Status: {getattr(insert_resp, 'status_code', 'N/A')}"
+                    if hasattr(insert_resp, 'error') and insert_resp.error:
+                        error_message = f"Insert failed: {insert_resp.error.message}"
+                    logger.error(f"Failed to insert enriched data for event {eid}: {error_message}")
+                    error_count += 1
 
             except Exception as insert_err:
                 logger.error(f"CRITICAL: Failed to insert enriched data for event {eid}: {insert_err}", exc_info=True)
@@ -395,12 +423,13 @@ def enrich_batch(batch: int = 500) -> None:
             # This catches errors *outside* the venue query block but *inside* the main loop for the event
             logger.error(f"Failed processing event {eid} ({e.get('title', 'No Title')}): {process_err}", exc_info=True)
             # Avoid double-marking if venue query failed and continued already
-            if 'venue_exc' not in locals(): # Check if venue error was the cause
-                 _mark_processed(eid, f"processing_error: {type(process_err).__name__}") # Mark general error
+            if 'venue_exc' not in locals():  # Check if venue error was the cause
+                _mark_processed(eid, f"processing_error: {type(process_err).__name__}")  # Mark general error
             error_count += 1
             # Continue to the next event in the loop
 
-    logger.info(f"Batch summary: Processed={processed_count}, Succeeded={success_count}, Skipped (No Venue)={skipped_venue}, Skipped (GPT Fail)={skipped_gpt}, Errors={error_count}")
+    logger.info(
+        f"Batch summary: Processed={processed_count}, Succeeded={success_count}, Skipped (No Venue)={skipped_venue}, Skipped (GPT Fail)={skipped_gpt}, Errors={error_count}")
 
 
 def _mark_processed(event_uuid: str, reason: str) -> None:
@@ -408,11 +437,11 @@ def _mark_processed(event_uuid: str, reason: str) -> None:
     max_reason_length = 255
     reason_truncated = (reason[:max_reason_length] + '...') if len(reason) > max_reason_length else reason
     payload = {
-        "event_id":     event_uuid,
-        "reason":       reason_truncated,
+        "event_id": event_uuid,
+        "reason": reason_truncated,
         "processed_at": datetime.now(timezone.utc).isoformat(),
     }
-    try: # Keep try/except for this non-critical logging operation
+    try:  # Keep try/except for this non-critical logging operation
         sb.table("events_enriched_processed").upsert(payload, on_conflict="event_id").execute()
         logger.debug(f"Marked event {event_uuid} as processed: {reason_truncated}")
     except Exception as e:
@@ -422,16 +451,16 @@ def _mark_processed(event_uuid: str, reason: str) -> None:
 
 # ───────────── CLI entry ───────────────────────────────────────── #
 def main():
-    logger.info("▶ enrichment v2 run starting")
+    logger.info("▶ enrichment run starting")
     enrich_batch()
-    logger.info("✔ enrichment v2 run finished")
+    logger.info("✔ enrichment run finished")
 
 
-if __name__=="__main__":
+if __name__ == "__main__":
     if not logger.handlers:
         h = logging.StreamHandler()
         h.setFormatter(logging.Formatter("[%(levelname)s] %(message)s"))
         logger.addHandler(h)
-    logger.setLevel(logging.INFO) # Set desired level (e.g., INFO or DEBUG)
+    logger.setLevel(logging.INFO)  # Set desired level (e.g., INFO or DEBUG)
 
     main()

@@ -7,7 +7,7 @@ export default function Footer() {
 
         {/* Slogan - More prominent */}
         <p className="text-sm text-neutral-700 dark:text-neutral-300">
-          Built with 🤍 in London. No tracking. No ads. Ever.
+          Built with 🤍 in London
         </p>
 
         {/* Copyright & Links - More subtle */}

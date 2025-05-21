@@ -5,8 +5,8 @@ import { Suspense } from 'react';
 
 // Initialize Supabase client (ensure these env vars are available server-side)
 // This should ideally be in a shared lib file, but for simplicity here:
-const supabaseUrl = process.env.SUPABASE_URL;
-const supabaseKey = process.env.SUPABASE_KEY;
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
 if (!supabaseUrl || !supabaseKey) {
   // In a real app, you might throw an error or have a fallback,
@@ -120,7 +120,7 @@ export default function UnsubscribePage({
   const token = typeof searchParams?.token === 'string' ? searchParams.token : undefined;
 
   // Check if Supabase env vars are available at the page level (optional check)
-  if (!process.env.SUPABASE_URL || !process.env.SUPABASE_KEY) {
+  if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
     return (
       <div className="min-h-screen bg-[#F5F2EE] dark:bg-neutral-950 flex items-center justify-center px-4 py-12">
         <div className="max-w-md w-full rounded-lg shadow-lg p-6 sm:p-8 bg-red-50 dark:bg-red-900/30">

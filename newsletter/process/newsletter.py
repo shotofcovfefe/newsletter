@@ -8,6 +8,8 @@ from openai import OpenAI
 from supabase import create_client
 from dotenv import load_dotenv
 
+from newsletter.utils import replace_json_gates
+
 load_dotenv()
 
 logger = logging.getLogger(__name__)
@@ -17,7 +19,6 @@ if not logger.hasHandlers():
     console_handler = logging.StreamHandler()
     console_handler.setFormatter(logging.Formatter("[%(levelname)s] %(message)s"))
     logger.addHandler(console_handler)
-
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
@@ -154,7 +155,7 @@ def score_events_with_ai(events: t.List[t.Dict[str, t.Any]]) -> t.List[t.Dict[st
 
         raw_response = completion.choices[0].message.content.strip()
         try:
-            raw_response.replace('```json', '').replace('```', '').replace('\n', '')
+            raw_response = replace_json_gates(raw_response)
             data = json.loads(raw_response)
         except json.JSONDecodeError as e:
             logger.error(f"Failed to parse AI response as JSON or Python literal: {e}")
@@ -221,7 +222,7 @@ def generate_newsletter_text(events: t.List[t.Dict[str, t.Any]]) -> str:
         location = ev.get("sender_name", "No Location")
         desc = ev.get("description", "")
         events_summary += (
-            f"{idx+1}. Title: {title}\n"
+            f"{idx + 1}. Title: {title}\n"
             f"   Date: {date}\n"
             f"   Location: {location}\n"
             f"   Description: {desc}\n\n"

@@ -6,7 +6,7 @@
     "email": "museummum@mail.beehiiv.com",
     "newsletter_type": "family events",
     "has_newsletter": true,
-    "signed_up": false
+    "signed_up": true
   },
   {
     "name": "London Museum of Water & Steam Fam NL",
@@ -42,7 +42,7 @@
     "email": "donotreply@southlondongallery.org",
     "newsletter_type": "art",
     "has_newsletter": true,
-    "signed_up": false
+    "signed_up": true
   },
   {
     "name": "Art of London Newsletter",
@@ -51,7 +51,7 @@
     "email": "campaigns@artoflondon.co.uk",
     "newsletter_type": "art",
     "has_newsletter": true,
-    "signed_up": false
+    "signed_up": true
   },
   {
     "name": "New Exhibitions Newsletter",
@@ -60,7 +60,7 @@
     "email": "info@newexhibitions.com",
     "newsletter_type": "art",
     "has_newsletter": true,
-    "signed_up": false
+    "signed_up": true
   },
   {
     "name": "London In Bits",
@@ -87,7 +87,7 @@
     "email": "hello@cheapskatelondon.com",
     "newsletter_type": "free events",
     "has_newsletter": true,
-    "signed_up": false
+    "signed_up": true
   },
   {
     "name": "London Pop-Ups “8 Days a Week”",
@@ -105,7 +105,7 @@
     "email": "thelondonscoop@mail.beehiiv.com",
     "newsletter_type": "family events",
     "has_newsletter": true,
-    "signed_up": false
+    "signed_up": true
   },
   {
     "name": "Secret London Newsletter",
@@ -114,7 +114,7 @@
     "email": "hello@secretldn.com",
     "newsletter_type": "general events, food, art",
     "has_newsletter": true,
-    "signed_up": false
+    "signed_up": true
   },
   {
     "name": "The London Weekend",
@@ -123,7 +123,7 @@
     "email": "jimmy@thelondonweekend.com",
     "newsletter_type": "weekend events",
     "has_newsletter": true,
-    "signed_up": false
+    "signed_up": true
   },
   {
     "name": "The Nudge",
@@ -145,13 +145,21 @@
     "signed_up": true
   },
   {
-    "name": "Jaguar Shoes Collective",
-    "url": "https://www.jaguarshoes.com/venues/the-victoria/",
-    "address": "451 Queensbridge Road\nDalston\nLondon\nE8 3AS",
-    "postcode": "E8 3AS",
-    "venue_type": "pub",
-    "is_generic": true,
+    "name": "The Nudge",
+    "descriptions": "Weekly recommendations for restaurants, bars, events, and cultural activities",
+    "url": "https://thenudge.com/email-signup/",
+    "email": "ldncalendar@substack.com",
+    "newsletter_type": "misc",
     "has_newsletter": true,
     "signed_up": false
+  },
+  {
+    "name": "LDN Calendar",
+    "descriptions": "Weekly recommendations for top events, gigs and exhibitions to exclusive deals and hidden gems.",
+    "url": "https://ldncalendar.substack.com/",
+    "email": "ldncalendar@substack.com",
+    "newsletter_type": "misc",
+    "has_newsletter": true,
+    "signed_up": true
   }
 ]

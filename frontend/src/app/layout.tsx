@@ -1,40 +1,47 @@
 // app/layout.tsx
 import './globals.css'
 import { Inter, EB_Garamond } from 'next/font/google'
-import Header from '@/components/Header'
-import Footer from '@/components/Footer'
-import FogOverlay from '@/components/FogOverlay' // Assuming this is positioned correctly relative to its container
+import Header from '@/components/Header' // Ensure this path is correct
+import Footer from '@/components/Footer' // Ensure this path is correct
 
+// Initialize fonts
 const inter = Inter({ subsets: ['latin'], variable: '--font-inter' })
 const garamond = EB_Garamond({ subsets: ['latin'], variable: '--font-garamond' })
 
+// Define metadata for the site
 export const metadata = {
-  title: 'Unfog London', // <-- Updated Title
-  description: 'Curated London events, tailored to your postcode and interests.', // <-- Updated Description
+  title: 'Unfog London',
+  description: 'Curated London events, tailored to your postcode and interests.',
+  icons: {
+    icon: [
+      { url: '/favicon.ico', sizes: 'any' },
+      { url: '/favicon-32x32.png', type: 'image/png' }
+    ],
+    apple: { url: '/apple-touch-icon.png', type: 'image/png' }
+  }
 }
 
+// Define the RootLayout component
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={`dark ${inter.variable} ${garamond.variable}`}>
-      {/* Apply flex layout and min-height to body to enable sticky footer */}
-      <body className="font-sans bg-white dark:bg-[#0A0A0A] text-black dark:text-white
-                       relative transition-colors duration-300
-                       flex flex-col min-h-screen"> {/* <-- ADDED flex setup */}
+    <html lang="en" className={`${inter.variable} ${garamond.variable}`}>
+      <body
+        className={
+          `font-sans bg-white dark:bg-[#0A0A0A] text-black dark:text-white ` + // These dark: styles will now apply conditionally
+          `relative transition-colors duration-300 ` +
+          `flex flex-col min-h-screen`
+        }
+      >
+        {/* Site Header */}
+        <Header />
 
-        <Header /> {/* Header stays at the top */}
-
-        {/* This wrapper div now grows to fill available space */}
-        {/* The FogOverlay's positioning depends on its own CSS. Relative here contains it unless it's fixed/absolute to viewport */}
-        <div className="relative z-10 flex-grow w-full"> {/* <-- ADDED flex-grow and w-full */}
-          {/* The 'children' (including page.tsx's <main>) render here */}
-          {/* <main> tag from page.tsx will be inside this div */}
-          {children}
-          {/* FogOverlay might need specific styling if it should cover header/footer */}
-          <FogOverlay />
+        {/* Main content area that grows to fill space */}
+        <div className="relative z-10 flex-grow w-full">
+          {children} {/* Page content will be rendered here */}
         </div>
 
-        <Footer /> {/* Footer is pushed down by the flex-grow div above */}
-
+        {/* Site Footer */}
+        <Footer />
       </body>
     </html>
   )

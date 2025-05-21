@@ -36,10 +36,10 @@ def process_single_venues(filepath: str) -> None:
     for v in venues_data:
 
         if not v.get("name"):
-             logger.warning(f"Skipping single venue due to missing name: {v}")
-             continue
+            logger.warning(f"Skipping single venue due to missing name: {v}")
+            continue
 
-        pc_info = get_postcode_info(v.get("postcode")) # Needs postcode
+        pc_info = get_postcode_info(v.get("postcode"))  # Needs postcode
         venue_id = hash_prefix(v["name"].lower().replace(' ', '').strip())
 
         rows_to_upsert.append({
@@ -57,6 +57,7 @@ def process_single_venues(filepath: str) -> None:
             "latitude": pc_info.get('lat') if pc_info else None,
             "longitude": pc_info.get('lon') if pc_info else None,
             "borough": pc_info.get('borough') if pc_info else None,
+            "neighbourhood": pc_info.get('neighbourhood') if pc_info else None,
         })
 
     if not rows_to_upsert:
@@ -76,7 +77,8 @@ def process_single_venues(filepath: str) -> None:
     elif response.data:
         logger.info(f"'venues' upsert processed {len(response.data)} rows.")
     else:
-        logger.warning(f"'venues' upsert completed but returned no data. Status: {getattr(response, 'status_code', 'N/A')}")
+        logger.warning(
+            f"'venues' upsert completed but returned no data. Status: {getattr(response, 'status_code', 'N/A')}")
 
 
 def process_aggregator_venues(filepath: str) -> None:
@@ -87,8 +89,8 @@ def process_aggregator_venues(filepath: str) -> None:
     rows_to_upsert = []
     for v in venues_data:
         if not v.get("name"):
-             logger.warning(f"Skipping aggregator venue due to missing name: {v}")
-             continue
+            logger.warning(f"Skipping aggregator venue due to missing name: {v}")
+            continue
 
         aggregator_id = hash_prefix(v["name"].lower().replace(' ', '').strip())
 
@@ -121,7 +123,8 @@ def process_aggregator_venues(filepath: str) -> None:
     elif response.data:
         logger.info(f"'aggregators' upsert processed {len(response.data)} rows.")
     else:
-        logger.warning(f"'aggregators' upsert completed but returned no data. Status: {getattr(response, 'status_code', 'N/A')}")
+        logger.warning(
+            f"'aggregators' upsert completed but returned no data. Status: {getattr(response, 'status_code', 'N/A')}")
 
 
 def main() -> None:
@@ -129,17 +132,17 @@ def main() -> None:
     try:
         process_single_venues(VENUES_FILEPATH)
     except FileNotFoundError:
-         logger.error(f"{VENUES_FILEPATH} not found.")
+        logger.error(f"{VENUES_FILEPATH} not found.")
     except Exception as e:
-         logger.error(f"Unhandled error processing single venues: {e}", exc_info=True)
+        logger.error(f"Unhandled error processing single venues: {e}", exc_info=True)
 
     # Process aggregator venues
     try:
         process_aggregator_venues(AGGREGATORS_FILEPATH)
     except FileNotFoundError:
-         logger.error(f"{AGGREGATORS_FILEPATH} not found.")
+        logger.error(f"{AGGREGATORS_FILEPATH} not found.")
     except Exception as e:
-         logger.error(f"Unhandled error processing aggregator venues: {e}", exc_info=True)
+        logger.error(f"Unhandled error processing aggregator venues: {e}", exc_info=True)
 
 
 if __name__ == "__main__":

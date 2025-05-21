@@ -5,7 +5,7 @@ description = "package for automating an events newsletter"
 readme = "README.md"
 requires-python = ">=3.11"
 
-packages = [{include = "newsletter"}]
+packages = [{ include = "newsletter" }]
 
 [tool.poetry.dependencies]
 python = "^3.11"
@@ -15,9 +15,12 @@ google-auth-httplib2 = "^0.2.0"
 supabase = "^2.3.4"
 psycopg2-binary = "^2.9.9"
 python-dotenv = "^1.0.1"
-openai = "^1.65.4"
+openai = "^1.78.0"
 beautifulsoup4 = "^4.13.3"
 pgeocode = "^0.5.0"
+curl-cffi = "^0.10.0"
+tenacity = "^9.1.2"
+anthropic = "^0.51.0"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.1.1"

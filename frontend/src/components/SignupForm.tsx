@@ -12,13 +12,8 @@ import {
 } from '@/lib/validation'
 
 // Dynamically import Turnstile to avoid SSR issues
-// Import TurnstileInstance for typing the ref, TurnstileProps might not be explicitly needed for the dynamic import itself
 import type { TurnstileInstance, TurnstileProps } from '@marsidev/react-turnstile';
 
-
-// Remove the explicit <TurnstileProps> generic from dynamic()
-// This allows TypeScript to correctly infer the ForwardRefExoticComponent type,
-// which includes the ability to accept a 'ref'.
 const Turnstile = dynamic(
   () => import('@marsidev/react-turnstile').then(m => m.Turnstile),
   { ssr: false }
@@ -189,6 +184,8 @@ export default function SignupForm({
 
   const { ref: emailFieldRefFromRHF, ...emailFieldRestPropsFromRHF } = register('email');
 
+  // Determine if there are errors in the input group to adjust padding
+  const hasInputGroupErrors = !!(errors.email || errors.postcode);
 
   useEffect(() => {
     if (formStatus === 'success' || formStatus === 'error') {
@@ -280,7 +277,7 @@ export default function SignupForm({
 
   const modeBaseTextClass = isLight ? 'text-neutral-800' : 'text-white';
   const wrapperClass = `
-    shadow-md rounded-xl px-6 py-8 space-y-6 text-left max-w-xl w-full
+    shadow-md rounded-xl px-6 py-8 space-y-4 text-left max-w-xl w-full
     ${isLight ? 'bg-white' : 'bg-neutral-900'} ${modeBaseTextClass}
   `
 
@@ -326,7 +323,7 @@ export default function SignupForm({
     cursor-pointer active:scale-95 disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center gap-2
   `
   const feedbackMessageContainerClasses = (status: FormStatus) => `
-    p-3 rounded-md text-sm mt-4 flex items-start gap-2 border
+    p-3 rounded-md text-sm flex items-start gap-2 border
     transition-all duration-300 ease-in-out
     ${status === 'success' ? `${C.bgSuccess} ${C.textSuccess} ${C.borderSuccess}` : ''}
     ${status === 'error' ? `${C.bgError} ${C.textError} ${C.borderError}` : ''}
@@ -355,14 +352,17 @@ export default function SignupForm({
       <input type="text" tabIndex={-1} className="hidden" {...register('website')} />
       <input type="hidden" value={newsletterSlug} {...register('newsletter')} />
 
-      <div className="flex flex-col sm:flex-row gap-4 relative pb-7">
+      {/* Email + Postcode group: Bottom padding is now conditional */}
+      {/* pb-4 (1rem) if errors.email or errors.postcode exist, to make space for the absolute error messages. */}
+      {/* pb-0 if no errors in this group, allowing space-y-4 on form to control gap to next section. */}
+      <div className={`flex flex-col sm:flex-row gap-4 relative ${hasInputGroupErrors ? 'pb-4' : 'pb-0'}`}>
         <div className="flex-1 relative">
           <label className="sr-only" htmlFor="email">Email</label>
           <input
             id="email"
             type="email"
             {...emailFieldRestPropsFromRHF}
-            ref={(e: HTMLInputElement | null) => { // Ensure 'e' is typed
+            ref={(e: HTMLInputElement | null) => {
               emailFieldRefFromRHF(e);
               emailInputRef.current = e;
             }}
@@ -459,21 +459,22 @@ export default function SignupForm({
             <p className="text-xs text-red-500 dark:text-red-400 mt-1">{errors.interests.message}</p>
           )}
         </div>
-      ) : null}
+      ) : (
+         <input type="hidden" value={singleInterest ?? ''} {...register('interests')} />
+      )}
 
       <div>
-        {/* The ref prop is correctly passed to the Turnstile component instance here */}
         <Turnstile
           ref={turnstileRef}
           siteKey={process.env.NEXT_PUBLIC_CF_SITE_KEY!}
           onSuccess={setToken}
-          options={{ theme: mode } as TurnstileProps['options']} // Added type assertion for options
-          onExpire={() => { // CORRECTED: onExpired to onExpire
+          options={{ theme: mode } as TurnstileProps['options']}
+          onExpire={() => {
             setValue('cfToken', '', { shouldValidate: true });
           }}
           onError={() => {
-            // setFormStatus('error');
-            // setFormMessage('Captcha challenge failed. Please try again.');
+            // Optional: setFormStatus('error');
+            // Optional: setFormMessage('Captcha challenge failed. Please try again.');
           }}
         />
         {errors.cfToken && (

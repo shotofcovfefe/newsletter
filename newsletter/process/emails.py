@@ -74,7 +74,6 @@ def decode_sender_name(sender_raw: str) -> str:
     return decoded_name or None
 
 
-
 def is_events_newsletter(email_body: str) -> bool:
     try:
         completion = client.chat.completions.create(
@@ -98,6 +97,40 @@ def is_events_newsletter(email_body: str) -> bool:
     except Exception as exc:
         logger.error(f"Error calling OpenAI for classification: {exc}")
         return False
+
+
+# ─────────────────── sender-type classification ──────────────────
+def classify_source(sender_email: str, sender_name: str) -> str:
+    """
+    Return 'venue' if the sender matches an existing `venues.email_address`
+    or `venues.name`, else 'aggregate' if it matches the `aggregators` table.
+    Fallback: 'aggregate' (safer to under-trust new senders).
+    """
+    name_condition = f'name.ilike."{sender_name}"'
+    venue_or_conditions = f'email_address.eq.{sender_email},{name_condition}'
+
+    # 1. venues
+    v_match = (
+        supabase.table("venues")
+        .select("id")
+        .or_(venue_or_conditions)
+        .limit(1)
+        .execute()
+        .data
+    )
+    if v_match:
+        return "venue"
+
+    # 2. aggregators
+    a_match = (
+        supabase.table("aggregators")
+        .select("id")
+        .or_(f"email_address.eq.{sender_email},name.ilike.{sender_name}")
+        .limit(1)
+        .execute()
+        .data
+    )
+    return "aggregate" if a_match else "aggregate"
 
 
 def format_date_for_gmail_query(iso_date: str) -> str:
@@ -164,6 +197,7 @@ def main() -> None:
             email_data['body'] = remove_urls(email_body)
 
         email_data["is_newsletter"] = is_events_newsletter(email_data['body'])
+        email_data["newsletter_source_type"] = classify_source(email_address, sender_name or "")
 
         # Save the email
         save_email(email_data)
