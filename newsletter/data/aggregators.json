@@ -145,15 +145,6 @@
     "signed_up": true
   },
   {
-    "name": "The Nudge",
-    "descriptions": "Weekly recommendations for restaurants, bars, events, and cultural activities",
-    "url": "https://thenudge.com/email-signup/",
-    "email": "ldncalendar@substack.com",
-    "newsletter_type": "misc",
-    "has_newsletter": true,
-    "signed_up": false
-  },
-  {
     "name": "LDN Calendar",
     "descriptions": "Weekly recommendations for top events, gigs and exhibitions to exclusive deals and hidden gems.",
     "url": "https://ldncalendar.substack.com/",

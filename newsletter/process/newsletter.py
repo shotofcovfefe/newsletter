@@ -8,7 +8,7 @@ from openai import OpenAI
 from supabase import create_client
 from dotenv import load_dotenv
 
-from newsletter.utils import replace_json_gates
+from newsletter.utils.utils import replace_json_gates
 
 load_dotenv()
 

@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 from supabase import create_client, Client
 
 from newsletter.constants import VENUES_FILEPATH, AGGREGATORS_FILEPATH
-from newsletter.utils import hash_prefix, get_postcode_info
+from newsletter.utils.utils import hash_prefix, get_postcode_info
 
 load_dotenv()
 
@@ -81,7 +81,7 @@ def process_single_venues(filepath: str) -> None:
             f"'venues' upsert completed but returned no data. Status: {getattr(response, 'status_code', 'N/A')}")
 
 
-def process_aggregator_venues(filepath: str) -> None:
+def process_aggregators(filepath: str) -> None:
     logger.info(f"Processing aggregator venues from: {filepath}")
     with open(filepath, "r", encoding="utf-8") as f:
         venues_data = json.load(f)
@@ -121,7 +121,7 @@ def process_aggregator_venues(filepath: str) -> None:
     if hasattr(response, 'error') and response.error:
         logger.error(f"'aggregators' upsert failed: {response.error.message}")
     elif response.data:
-        logger.info(f"'aggregators' upsert processed {len(response.data)} rows.")
+        logger.info(f"'aggregators' upsert processed {len(response.data)} individual data points.")
     else:
         logger.warning(
             f"'aggregators' upsert completed but returned no data. Status: {getattr(response, 'status_code', 'N/A')}")
@@ -129,20 +129,10 @@ def process_aggregator_venues(filepath: str) -> None:
 
 def main() -> None:
     # Process single venues first
-    try:
-        process_single_venues(VENUES_FILEPATH)
-    except FileNotFoundError:
-        logger.error(f"{VENUES_FILEPATH} not found.")
-    except Exception as e:
-        logger.error(f"Unhandled error processing single venues: {e}", exc_info=True)
+    process_single_venues(VENUES_FILEPATH)
 
     # Process aggregator venues
-    try:
-        process_aggregator_venues(AGGREGATORS_FILEPATH)
-    except FileNotFoundError:
-        logger.error(f"{AGGREGATORS_FILEPATH} not found.")
-    except Exception as e:
-        logger.error(f"Unhandled error processing aggregator venues: {e}", exc_info=True)
+    process_aggregators(AGGREGATORS_FILEPATH)
 
 
 if __name__ == "__main__":

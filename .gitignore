@@ -10,3 +10,4 @@ __pycache__/
 newsletter/data/venues.json
 newsletter/data/aggregators.json
 frontend/.env.local
+.cache

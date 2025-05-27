@@ -5,6 +5,7 @@ import email.header
 from bs4 import BeautifulSoup
 from email.utils import parseaddr
 from dateutil import parser
+from urllib.parse import quote
 
 from openai import OpenAI
 from supabase import create_client, Client
@@ -104,8 +105,9 @@ def classify_source(sender_email: str, sender_name: str) -> str:
     """
     Return 'venue' if the sender matches an existing `venues.email_address`
     or `venues.name`, else 'aggregate' if it matches the `aggregators` table.
-    Fallback: 'aggregate' (safer to under-trust new senders).
+    Fallback: 'unknown' (safer to under-trust new senders).
     """
+
     name_condition = f'name.ilike."{sender_name}"'
     venue_or_conditions = f'email_address.eq.{sender_email},{name_condition}'
 
@@ -125,12 +127,12 @@ def classify_source(sender_email: str, sender_name: str) -> str:
     a_match = (
         supabase.table("aggregators")
         .select("id")
-        .or_(f"email_address.eq.{sender_email},name.ilike.{sender_name}")
+        .or_(venue_or_conditions)
         .limit(1)
         .execute()
         .data
     )
-    return "aggregate" if a_match else "aggregate"
+    return "aggregate" if a_match else "unknown"
 
 
 def format_date_for_gmail_query(iso_date: str) -> str:
@@ -158,6 +160,7 @@ def main() -> None:
     latest_processed_date = date_res.data[0]["processed_at"]
     logger.info(f"Latest processed email at: {latest_processed_date}")
     gmail_query = f"after:{format_date_for_gmail_query(latest_processed_date)}"
+    gmail_query = f"after:{format_date_for_gmail_query('2025-05-25T01:23:46.284783')}"  # TODO: remove
 
     # 2. Fetch messages with the constructed query
     messages = gmail_client.fetch_messages(query=gmail_query)
@@ -197,9 +200,11 @@ def main() -> None:
             email_data['body'] = remove_urls(email_body)
 
         email_data["is_newsletter"] = is_events_newsletter(email_data['body'])
-        email_data["newsletter_source_type"] = classify_source(email_address, sender_name or "")
+        email_data["newsletter_source_type"] = classify_source(
+            sender_email=email_address,
+            sender_name=sender_name or ""
+        )
 
-        # Save the email
         save_email(email_data)
 
 

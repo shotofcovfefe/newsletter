@@ -21,6 +21,7 @@ pgeocode = "^0.5.0"
 curl-cffi = "^0.10.0"
 tenacity = "^9.1.2"
 anthropic = "^0.51.0"
+requests-html = "^0.10.0"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.1.1"

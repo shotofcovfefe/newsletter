@@ -4,9 +4,10 @@ Enrich events rows into events_enriched for front-end cards.
 
 from __future__ import annotations
 
-import json, os, logging, re, requests, mimetypes
-from datetime import datetime, date, timedelta, timezone
+import json, os, logging
+from datetime import datetime, date, timezone
 from typing import Any, List
+from urllib.parse import quote
 
 from dotenv import load_dotenv
 from openai import OpenAI
@@ -18,7 +19,7 @@ from newsletter.constants import SKIP_EMAIL_ADDRESSES
 from newsletter.types import (
     EventType, EventTargetAudience,
 )
-from newsletter.utils import get_postcode_info, is_valid_london_postcode
+from newsletter.utils.utils import get_postcode_info, is_valid_london_postcode
 
 # ───────────── env / logging / clients ────────────────────────── #
 load_dotenv()
@@ -256,16 +257,16 @@ def enrich_batch(batch: int = 500) -> None:
         return
 
     # --- Columns to select for venue ---
-    VENUE_COLUMNS = "id, name, latitude, longitude, url, postcode, neighbourhood, borough"
+    venue_columns = "id, name, latitude, longitude, url, postcode, neighbourhood, borough"
 
     # --- Process Events (Keep outer try/except for loop continuation) ---
     for e in events_to_process:
         eid = e["id"]
         processed_count += 1
-        logger.debug(f"Processing event: {eid} - {e.get('title', 'No Title')}")
+        logger.info(f"🧶 Processing event: {eid} - {e['title']}")
 
-        try:
-
+        venue = {}
+        if not e['from_aggregator']:
             # --- Fetch associated email data ---
             email_data = {}
             if msg_id := e.get("email_message_id"):
@@ -278,9 +279,6 @@ def enrich_batch(batch: int = 500) -> None:
             else:
                 logger.warning(f"Event {eid} has no email_message_id.")
 
-            if e['from_aggregator']:
-                print("ATTEMPTING ENRICHMENT WITH FROM AGGREGATE EVENT!!")
-
             venue = {}
             email_address = email_data.get("email_address")
             domain = extract_domain(email_address)
@@ -290,17 +288,19 @@ def enrich_batch(batch: int = 500) -> None:
                 continue
 
             # (a) match on exact email address
+            venue_q = f"email_address.eq.{email_address.lower().strip()}"
+
             if email_address:
                 venue_response = (
                     sb.table("venues")
-                    .select(VENUE_COLUMNS)
-                    .eq("email_address", email_address)
-                    .maybe_single()
+                    .select(venue_columns)
+                    .or_(venue_q)
+                    .limit(1)
                     .execute()
                 )
-                if venue_response and venue_response.data:
-                    venue = venue_response.data
-                    logger.info(f"Venue matched by email: {email_address} -> {venue['name']}")
+                if venue_response and len(venue_response.data):
+                    venue = venue_response.data[0]
+                    logger.info(f"📧  Venue matched by email: {email_address} -> {venue['name']}")
 
             # (b) match on domain (if no email match)
             if not venue and domain:
@@ -309,7 +309,7 @@ def enrich_batch(batch: int = 500) -> None:
                 if not any(keyword in domain.lower() for keyword in generic_domain_keywords):
                     venue_response = (
                         sb.table("venues")
-                        .select(VENUE_COLUMNS)
+                        .select(venue_columns)
                         .eq("domain", domain)
                         .limit(1)
                         .execute()
@@ -327,7 +327,7 @@ def enrich_batch(batch: int = 500) -> None:
                 if sender_name_lower not in generic_names:
                     venue_response = (
                         sb.table("venues")
-                        .select(VENUE_COLUMNS)
+                        .select(venue_columns)
                         .ilike("name", f"%{sender_name_lower}%")
                         .limit(1)
                         .execute()
@@ -345,88 +345,81 @@ def enrich_batch(batch: int = 500) -> None:
                 skipped_venue += 1
                 continue
 
-            # --- Sanitize arrays (Errors will raise) ---
-            event_types_raw = e.get("event_types")
-            target_audiences_raw = e.get("target_audiences")
-            vibes_tags_raw = e.get("vibes_tags")
+        # --- Sanitize arrays ---
+        vibes_tags_raw = e.get("vibes_tags")
 
-            # --- Generate Card Fields ---
-            date_line = render_event_date_string(e)
-            cost = cost_line(e)
+        # --- Generate Card Fields ---
+        date_line = render_event_date_string(e)
+        cost = cost_line(e)
 
-            # --- Call GPT (Errors handled inside function) ---
-            pretty = gpt_pretty(e, venue.get("name"))
+        # --- Call GPT (Errors handled inside function) ---
+        pretty = gpt_pretty(e, venue.get("name"))
 
-            # --- retrieve location information ---
-            borough = venue['borough']
-            neighbourhood = venue['neighbourhood']
-            if (not borough or not neighbourhood) and is_valid_london_postcode(e['location_postcode']):
-                postcode_info = get_postcode_info(e['location_postcode'])
-                if not borough:
-                    borough = postcode_info.get('borough')
-                if not neighbourhood:
-                    neighbourhood = postcode_info.get('neighbourhood')
+        # --- retrieve location information ---
+        borough = venue.get('borough') or e['location_borough']
+        neighbourhood = venue.get('neighbourhood') or e['location_neighbourhood']
+        if (not borough or not neighbourhood) and is_valid_london_postcode(e['location_postcode']):
+            postcode_info = get_postcode_info(e['location_postcode'])
+            if not borough:
+                borough = postcode_info.get('borough')
+            if not neighbourhood:
+                neighbourhood = postcode_info.get('neighbourhood')
 
-            # --- Prepare Insert Payload (Errors will raise) ---
-            insert_payload = {
-                "event_id": eid,
-                "venue_id": venue["id"],
-                "latitude": venue["latitude"],
-                "longitude": venue["longitude"],
-                "postcode": venue["postcode"],
-                "card_title": pretty["pretty_title"],
-                "venue_name": venue['name'],
-                "card_date_line": date_line,
-                "card_vibes_arr": vibes_tags_raw,
-                "card_blurb": pretty["blurb"],
-                "event_types": e["event_types"],
-                "audience_badges": e["target_audiences"],
-                "type_badge": pretty["event_type"],
-                "cost_line": cost,
-                "preview_image_url": e.get("image_url"),
-                "start_date": e.get("start_date"),
-                "end_date": e.get("end_date"),
-                "start_time": e.get("start_time"),
-                "end_time": e.get("end_time"),
-                "recurrence_rule": e["recurrence_rule"],
-                "venue_url": venue["url"],
-                "location_neighbourhood": neighbourhood,
-                "location_borough": borough,
-                "from_aggregator": e['from_aggregator']
-            }
+        # --- Prepare Insert Payload (Errors will raise) ---
+        insert_payload = {
+            "event_id": eid,
+            "venue_id": venue.get("id"),
+            "latitude": venue.get("latitude"),
+            "longitude": venue.get("longitude"),
+            "postcode": venue.get("postcode"),
+            "card_title": pretty["pretty_title"],
+            "venue_name": venue.get('name'),
+            "card_date_line": date_line,
+            "card_vibes_arr": vibes_tags_raw,
+            "card_blurb": pretty["blurb"],
+            "event_types": e["event_types"],
+            "audience_badges": e["target_audiences"],
+            "type_badge": pretty["event_type"],
+            "cost_line": cost,
+            "preview_image_url": e.get("image_url"),
+            "start_date": e.get("start_date"),
+            "end_date": e.get("end_date"),
+            "start_time": e.get("start_time"),
+            "end_time": e.get("end_time"),
+            "recurrence_rule": e["recurrence_rule"],
+            "venue_url": venue.get("url"),
+            "location_neighbourhood": neighbourhood,
+            "location_borough": borough,
+            "from_aggregator": e['from_aggregator']
+        }
 
-            if e['from_aggregator']:
-                print(insert_payload)
-                import sys
-                sys.exit(0)
-
-            # --- Insert into enriched table (Keep try/except) ---
-            try:
-                insert_resp = sb.table("events_enriched").insert(insert_payload).execute()
-                if hasattr(insert_resp, 'data') and insert_resp.data:
-                    logger.info(f"Success: Enriched event {eid} - {pretty['pretty_title']}")
-                    _mark_processed(eid, "Success")  # Mark success
-                    success_count += 1
-                else:
-                    error_message = f"Insert failed (no data returned or potential error). Status: {getattr(insert_resp, 'status_code', 'N/A')}"
-                    if hasattr(insert_resp, 'error') and insert_resp.error:
-                        error_message = f"Insert failed: {insert_resp.error.message}"
-                    logger.error(f"Failed to insert enriched data for event {eid}: {error_message}")
-                    error_count += 1
-
-            except Exception as insert_err:
-                logger.error(f"CRITICAL: Failed to insert enriched data for event {eid}: {insert_err}", exc_info=True)
-                error_count += 1
-
-        # --- Catch errors during *this specific event's general processing* ---
-        except Exception as process_err:
-            # This catches errors *outside* the venue query block but *inside* the main loop for the event
-            logger.error(f"Failed processing event {eid} ({e.get('title', 'No Title')}): {process_err}", exc_info=True)
-            # Avoid double-marking if venue query failed and continued already
-            if 'venue_exc' not in locals():  # Check if venue error was the cause
-                _mark_processed(eid, f"processing_error: {type(process_err).__name__}")  # Mark general error
+        # --- Insert into enriched table ---
+        # try:
+        insert_resp = sb.table("events_enriched").insert(insert_payload).execute()
+        if hasattr(insert_resp, 'data') and insert_resp.data:
+            logger.info(f"Success: Enriched event {eid} - {pretty['pretty_title']}")
+            _mark_processed(eid, "Success")  # Mark success
+            success_count += 1
+        else:
+            error_message = f"Insert failed (no data returned or potential error). Status: {getattr(insert_resp, 'status_code', 'N/A')}"
+            if hasattr(insert_resp, 'error') and insert_resp.error:
+                error_message = f"Insert failed: {insert_resp.error.message}"
+            logger.error(f"Failed to insert enriched data for event {eid}: {error_message}")
             error_count += 1
-            # Continue to the next event in the loop
+        #
+        # except Exception as insert_err:
+        #     logger.error(f"CRITICAL: Failed to insert enriched data for event {eid}: {insert_err}", exc_info=True)
+        #     error_count += 1
+
+        # # --- Catch errors during *this specific event's general processing* ---
+        # except Exception as process_err:
+        #     # This catches errors *outside* the venue query block but *inside* the main loop for the event
+        #     logger.error(f"Failed processing event {eid} ({e.get('title', 'No Title')}): {process_err}", exc_info=True)
+        #     # Avoid double-marking if venue query failed and continued already
+        #     if 'venue_exc' not in locals():  # Check if venue error was the cause
+        #         _mark_processed(eid, f"processing_error: {type(process_err).__name__}")  # Mark general error
+        #     error_count += 1
+        #     # Continue to the next event in the loop
 
     logger.info(
         f"Batch summary: Processed={processed_count}, Succeeded={success_count}, Skipped (No Venue)={skipped_venue}, Skipped (GPT Fail)={skipped_gpt}, Errors={error_count}")

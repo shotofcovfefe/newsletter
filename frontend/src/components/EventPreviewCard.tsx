@@ -5,10 +5,10 @@ import clsx from 'clsx'
 import { NewsletterConfig } from '@/config/newsletterConfigs' // Import your main config type
 
 export interface EventPreview {
-  id: number
+  id: number | string;
   card_title: string | null
   venue_name: string | null
-  card_date_line: string | null
+  card_date_line?: string | null
   card_vibes: string | null
   preview_image_url: string | null
   event_url: string | null

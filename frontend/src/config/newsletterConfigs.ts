@@ -84,7 +84,7 @@ const generateThemeFromConfig = (cfg: Omit<NewsletterConfig, 'theme'>): Required
 };
 
 
-export const newsletterConfigs: NewsletterConfig[] = [
+export const newsletterConfigs: NewsletterConfig[] = ([
   {
     slug: 'east-london',
     type: 'neighbourhood',
@@ -211,7 +211,7 @@ export const newsletterConfigs: NewsletterConfig[] = [
     headline: "London's Art Scene, Curated for You.",
     subheadline:
       'Your weekly guide to the most exciting exhibitions, openings, and art events near you. Free forever.',
-    events: ['Art'],
+    events: ['art', 'art_lovers', 'artistic', 'creatives', 'art_and_exhibitions'],
     primaryColor: 'red',
     ctaText: 'Subscribe to Art Updates',
     mode: 'light',
@@ -246,7 +246,7 @@ export const newsletterConfigs: NewsletterConfig[] = [
     headline: "London's Best Markets, Curated for You.",
     subheadline:
       'Find the best pop-ups, street food, vintage stalls, and more — weekly and free.',
-    events: ['Markets'],
+    events: ['markets_and_shopping', 'shopping'],
     primaryColor: 'green',
     ctaText: 'Subscribe to Market Updates',
     mode: 'light',
@@ -255,45 +255,8 @@ export const newsletterConfigs: NewsletterConfig[] = [
     accentBgClass: 'bg-green-500',
     accentTextClass: 'text-green-600',
     showFogOverlay: false,
-  },
-//   {
-//     slug: 'nightlife-special',
-//     type: 'tag',
-//     title: 'London Nightlife',
-//     headline: "The City's Pulse After Dark.",
-//     subheadline:
-//       'Exclusive events, secret gigs, and late-night adventures delivered to your inbox.',
-//     events: ['Nightlife', 'Late Night'],
-//     primaryColor: 'indigo',
-//     ctaText: 'Explore the Night',
-//     mode: 'dark', // This one is dark by default
-//     socialProof: 'For those who own the night.',
-//     images: { left: '/images/deco-night-left.png', right: '/images/deco-night-right.png' },
-//     accentBgClass: 'bg-indigo-500',
-//     accentTextClass: 'text-indigo-400', // Lighter accent for dark mode
-//     // Example of manually overriding a specific theme property for this dark newsletter
-//     showFogOverlay: true,
-//     theme: {
-//         mode: 'dark',
-//         accentColor: 'text-indigo-400', // from accentTextClass
-//         mainTextColor: 'text-neutral-100',
-//         heroHeadlineColor: 'text-white',
-//         heroSubheadlineColor: 'text-neutral-300',
-//         signupContainerBg: 'bg-neutral-800/80', // Darker with more opacity
-//         socialProofColor: 'text-neutral-400',
-//         cardBackgroundColor: 'bg-neutral-850', // Slightly different dark for cards
-//         cardBorderColor: 'border-neutral-700',
-//         cardTitleColor: 'text-indigo-300', // Use accent for titles here
-//         cardSubtitleColor: 'text-neutral-300',
-//         cardDateLineColor: 'text-indigo-400',
-//         cardBlurbColor: 'text-neutral-400',
-//         cardVibesColor: 'text-purple-400', // Different vibes color
-//         cardFloatingTitleOverlayBg: 'bg-black/70', // Darker overlay for floating cards
-//         cornerImageOpacity: 'opacity-30',
-//     }
-//   },
-].map(config => ({
+  }
+] satisfies Omit<NewsletterConfig, 'theme'>[]).map((config: Omit<NewsletterConfig, 'theme'>) => ({
   ...config,
-  // Automatically generate the theme object using the helper IF not already manually defined
-  theme: config.theme || generateThemeFromConfig(config),
+  theme: generateThemeFromConfig(config),
 }));

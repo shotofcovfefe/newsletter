@@ -57,7 +57,11 @@ class GmailClient:
         self.creds = load_credentials(self.token_path, SCOPES)
         self.service = build("gmail", "v1", credentials=self.creds)
 
-    def fetch_messages(self, query: t.Optional[str] = None) -> t.List[Message]:
+    def fetch_messages(
+            self,
+            query: t.Optional[str] = None,
+            max_results: int = 100
+    ) -> t.List[Message]:
         """
         Fetches all messages from Gmail matching the optional 'query'.
         Returns them as a list of 'email.message.Message' objects.
@@ -68,7 +72,7 @@ class GmailClient:
         while True:
             list_args = {
                 "userId": "me",
-                "maxResults": 100,  # adjust based on your needs
+                "maxResults": max_results,
             }
             if query:
                 list_args["q"] = query

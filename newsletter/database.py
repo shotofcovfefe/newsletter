@@ -139,8 +139,8 @@ def save_email(email_data: t.Dict[str, t.Any]) -> None:
         "date": date,
         "body": email_data["body"],
         "is_newsletter": email_data["is_newsletter"],
+        "newsletter_source_type": email_data["newsletter_source_type"],
     }
-    print(data['sender_name'])
 
     supabase.table("emails").insert(data).execute()
     logger.info(f"Stored email {data['message_id']} in Supabase.")

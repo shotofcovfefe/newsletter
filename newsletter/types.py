@@ -19,6 +19,7 @@ class TimeOfDay(str, Enum):
     evening = "evening"  # 17:00–20:59
     night = "night"  # 21:00–04:59
     all_day = "all_day"
+    various = "various"
     tbc = "tbc"
 
 
@@ -70,7 +71,6 @@ class EventBookingType(str, Enum):
 
 class EventTargetAudience(str, Enum):
     # ── broad & default ─────────────────────────────────────────
-    all = "all"
     adults = "adults"
     families = "families"
     kids = "kids"
@@ -108,6 +108,9 @@ class EventTargetAudience(str, Enum):
     fashion_enthusiasts = "fashionistas"
     history_buffs = "history_buffs"
     comedy_fans = "comedy_fans"
+    writers = "writers"
+    culture_enthusiasts = "culture_enthusiasts"
+    nature_enthusiasts = "nature_enthusiasts"
 
     # ── interest: food & drink ─────────────────────────────────
     foodies = "foodies"
@@ -172,16 +175,16 @@ class Event(BaseModel):
     email_message_id: str
 
     # text
-    title: str = "(untitled event)"
+    title: str = ""
     summary: str = ""
     description_verbatim: str | None = None
 
     # when
     start_date: date
-    end_date: date | None = None  # only for continuous spans
+    end_date: date | None = None
     start_time: time | None = None
     end_time: time | None = None
-    is_all_day: bool = False  # true for 24-hour spans
+    is_all_day: bool = False
     time_of_day: TimeOfDay = TimeOfDay.tbc
     timezone: str = "Europe/London"
 
@@ -192,6 +195,7 @@ class Event(BaseModel):
     # where
     location_type: EventLocationType = EventLocationType.tbc
     location_address_verbatim: str | None = None
+    location_postcode: str | None = None
     location_neighbourhood: str | None = None
     location_borough: str | None = None
     online_url: str | None = None
